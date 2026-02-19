@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { searchShows } from "@/lib/tvmaze";
+import { searchShows } from "@/lib/tmdb";
 import ShowCard from "@/components/ui/ShowCard";
 import SkeletonCard, { SkeletonText } from "@/components/ui/SkeletonCard";
 import type { TVMazeShow } from "@/types";
