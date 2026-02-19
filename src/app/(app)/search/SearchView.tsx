@@ -133,8 +133,20 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const [langFilter, setLangFilter]     = useState<LanguageFilter>("all");
   const [filtersOpen, setFiltersOpen]   = useState(false);
 
-  const isSearching = query.trim().length > 0 || activeGenre !== null;
-  const baseShows   = isSearching ? results : popularShows;
+  const isTyping    = query.trim().length > 0;
+  const isSearching = isTyping || activeGenre !== null;
+
+  // Genre chips always filter client-side from popularShows (or from typed search results)
+  const baseShows = (() => {
+    const source = isTyping ? results : popularShows;
+    if (activeGenre) {
+      return source.filter((s) =>
+        s.genres.some((g) => g.toLowerCase() === activeGenre.toLowerCase())
+      );
+    }
+    return source;
+  })();
+
   const displayShows = applyFiltersAndSort(
     baseShows,
     sortOption,
@@ -152,21 +164,20 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const isFilteredEmpty =
     (status === "idle" || status === "success") &&
     displayShows.length === 0 &&
-    baseShows.length > 0;
+    (popularShows.length > 0 || results.length > 0);
 
+  // Only fire API search for typed queries — genre chips filter client-side
   useEffect(() => {
     const trimmed = query.trim();
 
     // Reset visible count whenever search term or genre changes
     setVisibleCount(20);
 
-    if (trimmed.length === 0 && activeGenre === null) {
+    if (trimmed.length === 0) {
       setStatus("idle");
       setResults([]);
       return;
     }
-
-    const searchTerm = trimmed || activeGenre || "";
 
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
@@ -176,7 +187,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
 
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(searchTerm)}`);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
         if (!res.ok) throw new Error("Search failed");
         const data: Array<{ show: import("@/types").TVMazeShow }> = await res.json();
         const shows = data.map((r) => r.show);
@@ -198,7 +209,12 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         clearTimeout(debounceRef.current);
       }
     };
-  }, [query, activeGenre]);
+  }, [query]);
+
+  // Reset visible count when genre changes too
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [activeGenre]);
 
   // Infinite scroll — reveal 20 more popular shows when sentinel enters viewport
   useEffect(() => {
@@ -489,9 +505,11 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       <div>
         {/* Section label */}
         <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
-          {status === "idle" && "Popular Shows"}
+          {status === "idle" && !activeGenre && "Popular Shows"}
+          {status === "idle" && activeGenre && `${activeGenre} Shows`}
           {status === "loading" && "Searching..."}
-          {status === "success" && `Results for "${activeGenre ?? query}"`}
+          {status === "success" && !activeGenre && `Results for "${query}"`}
+          {status === "success" && activeGenre && `${activeGenre} · Results for "${query}"`}
           {status === "empty" && "No Results"}
           {status === "error" && "Something went wrong"}
         </p>
