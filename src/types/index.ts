@@ -116,6 +116,15 @@ export interface UserShow {
   created_at: string;
 }
 
+export interface EnrichedUserShow extends UserShow {
+  /** True if next episode is in a new season and airs within 3 months */
+  newSeasonComingSoon: boolean;
+  /** ISO date of the next episode air date, if any */
+  nextEpisodeAirDate: string | null;
+  /** True if the show has unreleased episodes in the same season as the last aired */
+  hasUpcomingEpisodesInCurrentSeason: boolean;
+}
+
 export interface WatchProgress {
   id: string;
   user_id: string;

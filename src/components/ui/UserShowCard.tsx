@@ -21,9 +21,10 @@ const STATUS_CONFIG: Record<ShowStatus, { label: string; color: string }> = {
 interface UserShowCardProps {
   userShow: UserShow;
   priority?: boolean;
+  newSeasonComingSoon?: boolean;
 }
 
-export default function UserShowCard({ userShow, priority = false }: UserShowCardProps) {
+export default function UserShowCard({ userShow, priority = false, newSeasonComingSoon = false }: UserShowCardProps) {
   const { show_name, show_poster, tvmaze_show_id, status } = userShow;
   const badge = STATUS_CONFIG[status];
 
@@ -51,6 +52,21 @@ export default function UserShowCard({ userShow, priority = false }: UserShowCar
               <span className="text-text-muted text-xs text-center leading-relaxed line-clamp-3">
                 {show_name}
               </span>
+            </div>
+          )}
+
+          {/* "New Season Soon" tag — top-left */}
+          {newSeasonComingSoon && (
+            <div
+              className="
+                absolute top-2 left-2
+                px-2 py-0.5 rounded-full
+                text-[9px] font-semibold
+                bg-amber-500/90 text-black
+                backdrop-blur-sm
+              "
+            >
+              New Season Soon
             </div>
           )}
 

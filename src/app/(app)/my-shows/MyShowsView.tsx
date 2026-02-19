@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import PageWrapper from "@/components/layout/PageWrapper";
 import UserShowCard from "@/components/ui/UserShowCard";
-import type { UserShow, ShowStatus } from "@/types";
+import type { EnrichedUserShow, ShowStatus } from "@/types";
 
 // ── Constants + pure helpers (outside component) ──────────────────────────
 
@@ -20,7 +20,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "dropped",       label: "Dropped"       },
 ];
 
-function filterShows(shows: UserShow[], tab: TabId): UserShow[] {
+function filterShows(shows: EnrichedUserShow[], tab: TabId): EnrichedUserShow[] {
   if (tab === "all") return shows;
   return shows.filter((s) => s.status === tab);
 }
@@ -33,7 +33,7 @@ const gridContainerVariants = {
 // ── Component ──────────────────────────────────────────────────────────────
 
 interface MyShowsViewProps {
-  initialShows: UserShow[];
+  initialShows: EnrichedUserShow[];
   isLoggedIn: boolean;
 }
 
@@ -189,6 +189,7 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
                     key={userShow.id}
                     userShow={userShow}
                     priority={index < 4}
+                    newSeasonComingSoon={userShow.newSeasonComingSoon}
                   />
                 ))}
               </motion.div>

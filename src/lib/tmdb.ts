@@ -347,6 +347,50 @@ export async function getTopRatedShows(): Promise<TVMazeShow[]> {
   return (data.results ?? []).map((r) => mapListResult(r, genreMap));
 }
 
+// ── Season metadata (for My Shows enrichment) ──────────────────────────────────
+
+export interface ShowSeasonMeta {
+  tmdbId: number;
+  nextEpisode: {
+    seasonNumber: number;
+    episodeNumber: number;
+    airDate: string | null;
+  } | null;
+  lastEpisode: {
+    seasonNumber: number;
+    episodeNumber: number;
+    airDate: string | null;
+  } | null;
+  numberOfSeasons: number;
+}
+
+/** Lightweight metadata fetch — returns season-level info for enrichment logic */
+export async function getShowSeasonMeta(id: number): Promise<ShowSeasonMeta | null> {
+  try {
+    const raw = await tmdbFetch<TMDBShowRaw>(`/tv/${id}`);
+    return {
+      tmdbId: raw.id,
+      nextEpisode: raw.next_episode_to_air
+        ? {
+            seasonNumber: raw.next_episode_to_air.season_number,
+            episodeNumber: raw.next_episode_to_air.episode_number,
+            airDate: raw.next_episode_to_air.air_date,
+          }
+        : null,
+      lastEpisode: raw.last_episode_to_air
+        ? {
+            seasonNumber: raw.last_episode_to_air.season_number,
+            episodeNumber: raw.last_episode_to_air.episode_number,
+            airDate: raw.last_episode_to_air.air_date,
+          }
+        : null,
+      numberOfSeasons: raw.number_of_seasons,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Discover TV shows by genre (paginated, 20 per page) with optional server-side filters */
 export async function discoverShows(options: {
   genreId?: number;
