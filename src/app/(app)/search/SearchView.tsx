@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { searchShows } from "@/lib/tmdb";
 import ShowCard from "@/components/ui/ShowCard";
 import SkeletonCard, { SkeletonText } from "@/components/ui/SkeletonCard";
 import type { TVMazeShow } from "@/types";
@@ -177,7 +176,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
 
     debounceRef.current = setTimeout(async () => {
       try {
-        const data = await searchShows(searchTerm);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(searchTerm)}`);
+        if (!res.ok) throw new Error("Search failed");
+        const data: Array<{ show: import("@/types").TVMazeShow }> = await res.json();
         const shows = data.map((r) => r.show);
         if (shows.length === 0) {
           setStatus("empty");
