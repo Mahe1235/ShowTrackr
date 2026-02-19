@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import ShowCard from "@/components/ui/ShowCard";
@@ -37,149 +37,17 @@ type StatusFilter  = "all" | "running" | "ended";
 type RatingFilter  = "any" | "7" | "8";
 type LanguageFilter = "all" | "english";
 
-// Minimum number of votes required for a show to be sorted by rating.
-// Shows with fewer votes are pushed to the bottom because their score is unreliable.
-const MIN_VOTES_FOR_RATING = 50;
-
 interface SearchViewProps {
   popularShows: TVMazeShow[];
 }
 
-// Pure function — lives outside the component so it's never re-created on render
-function applyFiltersAndSort(
-  shows: TVMazeShow[],
-  sort: SortOption,
-  status: StatusFilter,
-  rating: RatingFilter,
-  lang: LanguageFilter
-): TVMazeShow[] {
-  let result = shows;
-
-  // 1. Filter by status
-  // Shows with "Unknown" status (from TMDB list endpoints that don't include
-  // status data) are kept — we don't have enough info to exclude them.
-  if (status !== "all") {
-    result = result.filter((s) => {
-      if (s.status === "Unknown") return true; // keep — status data unavailable
-      return status === "running"
-        ? s.status === "Running"
-        : s.status !== "Running";
-    });
-  }
-
-  // 2. Filter by minimum rating (nulls always excluded when threshold is set)
-  if (rating !== "any") {
-    const threshold = rating === "7" ? 7.0 : 8.0;
-    result = result.filter(
-      (s) => s.rating.average !== null && s.rating.average >= threshold
-    );
-  }
-
-  // 3. Filter by language
-  if (lang === "english") {
-    result = result.filter((s) => s.language === "English");
-  }
-
-  // 4. Sort — slice() first to avoid mutating the original prop array
-  return result.slice().sort((a, b) => {
-    switch (sort) {
-      case "popularity":
-        return b.weight - a.weight;
-      case "rating": {
-        // Penalise shows with very few votes — they get unreliable scores
-        const aHasEnough = (a.weight ?? 0) >= MIN_VOTES_FOR_RATING;
-        const bHasEnough = (b.weight ?? 0) >= MIN_VOTES_FOR_RATING;
-        if (aHasEnough && !bHasEnough) return -1;
-        if (!aHasEnough && bHasEnough) return 1;
-        const ra = a.rating.average ?? -1;
-        const rb = b.rating.average ?? -1;
-        return rb - ra;
-      }
-      case "year_desc": {
-        const ya = a.premiered ?? "";
-        const yb = b.premiered ?? "";
-        if (!ya && !yb) return 0;
-        if (!ya) return 1;
-        if (!yb) return -1;
-        return yb.localeCompare(ya);
-      }
-      case "year_asc": {
-        const ya = a.premiered ?? "";
-        const yb = b.premiered ?? "";
-        if (!ya && !yb) return 0;
-        if (!ya) return 1;
-        if (!yb) return -1;
-        return ya.localeCompare(yb);
-      }
-      case "name":
-        return a.name.localeCompare(b.name);
-      default:
-        return 0;
-    }
-  });
-}
-
-// ── Fallback types & client-side diagnosis ──────────────────────────────────
+// ── Fallback types ──────────────────────────────────────────────────────────
 
 interface FallbackInfo {
   shows: TVMazeShow[];
   totalPages: number;
   relaxedFilter: string;
   relaxedFilterLabel: string;
-}
-
-/** When client-side filters yield 0 results, try relaxing each filter in
- *  priority order (rating → status → language) and return the first that
- *  produces results. Runs entirely on the already-loaded shows array — zero
- *  API calls. */
-function diagnoseEmptyFilters(
-  shows: TVMazeShow[],
-  sort: SortOption,
-  statusF: StatusFilter,
-  ratingF: RatingFilter,
-  langF: LanguageFilter
-): FallbackInfo | null {
-  const candidates: Array<{
-    filter: string;
-    label: string;
-    apply: () => TVMazeShow[];
-  }> = [];
-
-  if (ratingF !== "any") {
-    candidates.push({
-      filter: "rating",
-      label: ratingF === "8" ? "8+ rating" : "7+ rating",
-      apply: () => applyFiltersAndSort(shows, sort, statusF, "any", langF),
-    });
-  }
-  if (statusF !== "all") {
-    candidates.push({
-      filter: "status",
-      label: statusF === "running" ? "Running status" : "Ended status",
-      apply: () => applyFiltersAndSort(shows, sort, "all", ratingF, langF),
-    });
-  }
-  if (langF !== "all") {
-    candidates.push({
-      filter: "lang",
-      label: "English only",
-      apply: () => applyFiltersAndSort(shows, sort, statusF, ratingF, "all"),
-    });
-  }
-
-  for (const c of candidates) {
-    const relaxed = c.apply();
-    if (relaxed.length > 0) {
-      return {
-        shows: relaxed,
-        totalPages: 1,
-        relaxedFilter: c.filter,
-        relaxedFilterLabel: c.label,
-      };
-    }
-  }
-
-  return null;
 }
 
 export default function SearchView({ popularShows }: SearchViewProps) {
@@ -204,6 +72,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     (ratingFilter  !== "any"        ? 1 : 0) +
     (langFilter    !== "all"        ? 1 : 0);
 
+  // Are any filters/genre active? If so, we use server-side discover.
+  const useServerDiscover = !!(activeGenre || activeFilterCount > 0);
+
   // ── Helper: update one or more URL params (shallow replace, no scroll) ────
   const setParams = useCallback(
     (updates: Record<string, string | null>) => {
@@ -227,72 +98,60 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const [status, setStatus] = useState<SearchStatus>("idle");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Genre discover state (server-paginated)
-  const [genreShows, setGenreShows] = useState<TVMazeShow[]>([]);
-  const [genrePage, setGenrePage] = useState(1);
-  const [genreTotalPages, setGenreTotalPages] = useState(0);
-  const [genreLoading, setGenreLoading] = useState(false);
+  // Discover state (server-paginated) — used for genre AND filtered popular
+  const [discoverShows, setDiscoverShows] = useState<TVMazeShow[]>([]);
+  const [discoverPage, setDiscoverPage] = useState(1);
+  const [discoverTotalPages, setDiscoverTotalPages] = useState(0);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
 
-  // Fallback state — set when server-side genre discover returns 0 results
+  // Fallback state — set when server-side discover returns 0 results
   const [serverFallback, setServerFallback] = useState<FallbackInfo | null>(null);
 
-  // Popular shows infinite scroll (client-side virtual pagination)
+  // Popular shows infinite scroll (client-side virtual pagination, no filters)
   const [visibleCount, setVisibleCount] = useState(20);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const isTyping = query.trim().length > 0;
 
-  // Determine which shows to display
-  // Genre discover: filters are applied server-side, so no client filter needed
-  // Popular/search: apply client-side filters
-  const baseShows = isTyping
+  // ── Determine which shows to display ──────────────────────────────────────
+  // All filtering is done server-side via /api/discover.
+  // popularShows is only used when there are NO filters and NO genre active.
+  const displayShows = isTyping
     ? searchResults
-    : activeGenre
-      ? genreShows
+    : useServerDiscover
+      ? discoverShows
       : popularShows;
-
-  const displayShows = (activeGenre && !isTyping)
-    ? baseShows // Genre: already filtered server-side
-    : applyFiltersAndSort(baseShows, sortOption, statusFilter, ratingFilter, langFilter);
 
   const isFilteredEmpty =
     (status === "idle" || status === "success") &&
-    !genreLoading &&
+    !discoverLoading &&
     displayShows.length === 0 &&
-    (activeGenre ? true : baseShows.length > 0);
-
-  // Client-side fallback: when popular/search filters yield 0 results,
-  // diagnose which filter to relax — runs on already-loaded data (no API calls)
-  const clientFallback = useMemo(() => {
-    if (!isFilteredEmpty || activeGenre || isTyping) return null;
-    if (activeFilterCount === 0) return null;
-    return diagnoseEmptyFilters(baseShows, sortOption, statusFilter, ratingFilter, langFilter);
-  }, [isFilteredEmpty, activeGenre, isTyping, activeFilterCount, baseShows, sortOption, statusFilter, ratingFilter, langFilter]);
-
-  // Unified fallback: server path uses serverFallback, client path uses clientFallback
-  const fallbackData = activeGenre ? serverFallback : clientFallback;
+    useServerDiscover &&
+    !isTyping;
 
   // ── Build discover URL with filters ────────────────────────────────────────
+  // Works with or without a genre — when genre is omitted, TMDB returns all shows
+  // sorted/filtered by the other params (effectively "popular shows with filters").
   const buildDiscoverUrl = useCallback(
-    (genre: string, page: number): string => {
+    (page: number): string => {
       const params = new URLSearchParams({
-        genre,
         page: String(page),
       });
+      if (activeGenre) params.set("genre", activeGenre);
       if (sortOption !== "popularity") params.set("sort", sortOption);
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (ratingFilter !== "any") params.set("rating", ratingFilter);
       if (langFilter === "english") params.set("language", "en");
       return `/api/discover?${params.toString()}`;
     },
-    [sortOption, statusFilter, ratingFilter, langFilter]
+    [activeGenre, sortOption, statusFilter, ratingFilter, langFilter]
   );
 
-  // ── Fetch genre discover results from /api/discover ────────────────────────
-  const fetchGenre = useCallback(async (url: string, append: boolean) => {
-    setGenreLoading(true);
-    setServerFallback(null);
+  // ── Fetch discover results from /api/discover ─────────────────────────────
+  const fetchDiscover = useCallback(async (url: string, append: boolean) => {
+    setDiscoverLoading(true);
+    if (!append) setServerFallback(null);
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error("Discover failed");
@@ -303,11 +162,11 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       } = await res.json();
 
       if (append) {
-        setGenreShows((prev) => [...prev, ...data.shows]);
+        setDiscoverShows((prev) => [...prev, ...data.shows]);
       } else {
-        setGenreShows(data.shows);
+        setDiscoverShows(data.shows);
       }
-      setGenreTotalPages(data.totalPages);
+      setDiscoverTotalPages(data.totalPages);
 
       // If primary query returned empty but API provided fallback results
       if (data.shows.length === 0 && data.fallback) {
@@ -316,22 +175,22 @@ export default function SearchView({ popularShows }: SearchViewProps) {
 
       // Extract page from URL
       const p = new URL(url, window.location.origin).searchParams.get("page");
-      setGenrePage(parseInt(p ?? "1", 10));
+      setDiscoverPage(parseInt(p ?? "1", 10));
     } catch {
-      if (!append) setGenreShows([]);
+      if (!append) setDiscoverShows([]);
     } finally {
-      setGenreLoading(false);
+      setDiscoverLoading(false);
     }
   }, []);
 
-  // When genre or filters change, fetch page 1 with current filters
+  // When genre or any filter changes, fetch page 1 from discover
   useEffect(() => {
-    if (activeGenre && !isTyping) {
-      setGenreShows([]);
-      setGenrePage(1);
-      setGenreTotalPages(0);
+    if (useServerDiscover && !isTyping) {
+      setDiscoverShows([]);
+      setDiscoverPage(1);
+      setDiscoverTotalPages(0);
       setStatus("idle");
-      fetchGenre(buildDiscoverUrl(activeGenre, 1), false);
+      fetchDiscover(buildDiscoverUrl(1), false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGenre, isTyping, sortOption, statusFilter, ratingFilter, langFilter]);
@@ -383,13 +242,13 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       (entries) => {
         if (!entries[0].isIntersecting) return;
 
-        if (activeGenre && !isTyping) {
-          // Server-side pagination: load next page from TMDB discover
-          if (!genreLoading && genrePage < genreTotalPages) {
-            fetchGenre(buildDiscoverUrl(activeGenre, genrePage + 1), true);
+        if (useServerDiscover && !isTyping) {
+          // Server-side pagination: load next page from discover
+          if (!discoverLoading && discoverPage < discoverTotalPages) {
+            fetchDiscover(buildDiscoverUrl(discoverPage + 1), true);
           }
         } else {
-          // Client-side virtual pagination for popular/search results
+          // Client-side virtual pagination for default popular / search results
           setVisibleCount((prev) => prev + 20);
         }
       },
@@ -398,7 +257,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     observer.observe(sentinel);
     return () => observer.disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGenre, isTyping, genreLoading, genrePage, genreTotalPages, buildDiscoverUrl]);
+  }, [useServerDiscover, isTyping, discoverLoading, discoverPage, discoverTotalPages, buildDiscoverUrl]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -433,14 +292,14 @@ export default function SearchView({ popularShows }: SearchViewProps) {
 
   // ── Computed display values ────────────────────────────────────────────────
 
-  // For popular shows & search: slice by visibleCount. For genre: show all loaded.
-  const showsToRender = (activeGenre && !isTyping)
+  // For server-paginated paths: show all loaded. For default popular / search: slice.
+  const showsToRender = (useServerDiscover && !isTyping)
     ? displayShows
     : displayShows.slice(0, visibleCount);
 
   // Show sentinel when there's more to load
-  const hasMore = (activeGenre && !isTyping)
-    ? genrePage < genreTotalPages
+  const hasMore = (useServerDiscover && !isTyping)
+    ? discoverPage < discoverTotalPages
     : visibleCount < displayShows.length;
 
   // Determine section label
@@ -453,8 +312,8 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     return "Popular Shows";
   })();
 
-  // Initial genre load shows skeletons
-  const showGenreSkeletons = activeGenre && !isTyping && genreLoading && genreShows.length === 0;
+  // Initial discover load shows skeletons
+  const showDiscoverSkeletons = useServerDiscover && !isTyping && discoverLoading && discoverShows.length === 0;
 
   return (
     <div className="flex flex-col gap-6 pt-12 pb-6">
@@ -717,8 +576,8 @@ export default function SearchView({ popularShows }: SearchViewProps) {
           {sectionLabel}
         </p>
 
-        {/* Loading skeletons — search or initial genre load */}
-        {(status === "loading" || showGenreSkeletons) && (
+        {/* Loading skeletons — search or initial discover load */}
+        {(status === "loading" || showDiscoverSkeletons) && (
           <div className="grid grid-cols-2 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="flex flex-col gap-2">
@@ -747,10 +606,10 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         )}
 
         {/* Show grid */}
-        {(status === "idle" || status === "success") && !showGenreSkeletons && (
+        {(status === "idle" || status === "success") && !showDiscoverSkeletons && (
           <>
             {isFilteredEmpty ? (
-              fallbackData ? (
+              serverFallback ? (
                 /* ── Fallback: filters too restrictive, show relaxed results ── */
                 <>
                   <div className="rounded-xl bg-bg-surface border border-accent/20 p-4 mb-4">
@@ -778,18 +637,18 @@ export default function SearchView({ popularShows }: SearchViewProps) {
                         <p className="text-text-secondary text-xs leading-relaxed">
                           Showing results without the{" "}
                           <span className="text-accent font-medium">
-                            {fallbackData.relaxedFilterLabel}
+                            {serverFallback.relaxedFilterLabel}
                           </span>{" "}
                           filter.
                         </p>
                         <div className="flex gap-2 mt-1">
                           <button
                             onClick={() =>
-                              setParams({ [fallbackData.relaxedFilter]: null })
+                              setParams({ [serverFallback.relaxedFilter]: null })
                             }
                             className="px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-medium transition-colors hover:bg-accent/20"
                           >
-                            Remove {fallbackData.relaxedFilterLabel}
+                            Remove {serverFallback.relaxedFilterLabel}
                           </button>
                           <button
                             onClick={handleResetFilters}
@@ -810,7 +669,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
                       animate="show"
                       className="grid grid-cols-2 gap-3"
                     >
-                      {fallbackData.shows.slice(0, 20).map((show, index) => (
+                      {serverFallback.shows.slice(0, 20).map((show, index) => (
                         <ShowCard key={show.id} show={show} priority={index < 4} />
                       ))}
                     </motion.div>
@@ -847,10 +706,10 @@ export default function SearchView({ popularShows }: SearchViewProps) {
               </AnimatePresence>
             )}
 
-            {/* Sentinel — loads more on scroll (server pages for genre, client virtual for others) */}
+            {/* Sentinel — loads more on scroll (server pages for discover, client virtual for others) */}
             {hasMore && (
               <div ref={sentinelRef} className="h-8 mt-2 flex items-center justify-center">
-                {genreLoading && (
+                {discoverLoading && (
                   <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
                 )}
               </div>
