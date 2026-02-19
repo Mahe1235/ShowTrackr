@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { discoverShows, GENRE_MAP } from "@/lib/tmdb";
+import { discoverShows, discoverShowsByRating, GENRE_MAP } from "@/lib/tmdb";
 
 // Map client sort options to TMDB sort_by values
 const SORT_MAP: Record<string, string> = {
@@ -19,14 +19,26 @@ export async function GET(request: Request) {
   const rating   = searchParams.get("rating");
   const language = searchParams.get("language");
 
-  const voteCount = searchParams.get("vote_count");
-
-  const genreId      = GENRE_MAP[genre] ?? undefined;
-  const sortBy       = SORT_MAP[sort] ?? "popularity.desc";
-  const ratingMin    = rating ? parseFloat(rating) : undefined;
-  const voteCountMin = voteCount ? parseInt(voteCount, 10) : undefined;
+  const genreId   = GENRE_MAP[genre] ?? undefined;
+  const ratingMin = rating ? parseFloat(rating) : undefined;
 
   try {
+    // When sorting by rating, use the hybrid approach:
+    // fetch popular shows from TMDB, then re-sort by rating server-side.
+    // This ensures only well-known shows appear in the "top rated" list.
+    if (sort === "rating") {
+      const result = await discoverShowsByRating({
+        genreId,
+        page,
+        status: status ?? undefined,
+        ratingMin,
+        language: language ?? undefined,
+      });
+      return NextResponse.json(result);
+    }
+
+    // All other sorts: pass directly to TMDB
+    const sortBy = SORT_MAP[sort] ?? "popularity.desc";
     const result = await discoverShows({
       genreId,
       page,
@@ -34,7 +46,6 @@ export async function GET(request: Request) {
       status: status ?? undefined,
       ratingMin,
       language: language ?? undefined,
-      voteCountMin,
     });
     return NextResponse.json(result);
   } catch (err) {

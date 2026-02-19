@@ -384,3 +384,75 @@ export async function discoverShows(options: {
     totalPages: data.total_pages ?? 0,
   };
 }
+
+/**
+ * Hybrid "top rated" discover: fetch multiple pages sorted by popularity from
+ * TMDB (ensuring only well-known shows), then re-sort by vote_average on our
+ * server. Returns a virtual page (20 shows) from that re-sorted pool.
+ *
+ * This avoids the TMDB issue where sorting by vote_average surfaces obscure
+ * shows with high ratings but very few votes.
+ */
+const RATING_POOL_PAGES = 5;          // 5 TMDB pages = 100 popular shows
+const RATING_PAGE_SIZE  = 20;
+const RATING_MIN_VOTES  = 200;
+
+export async function discoverShowsByRating(options: {
+  genreId?: number;
+  page?: number;                       // virtual page within the re-sorted pool
+  status?: "running" | "ended";
+  ratingMin?: number;
+  language?: string;
+}): Promise<{ shows: TVMazeShow[]; totalPages: number }> {
+  const { genreId, page = 1, status, ratingMin, language } = options;
+
+  // Build base params — always fetch by popularity so we get well-known shows
+  const baseParams = new URLSearchParams({
+    sort_by: "popularity.desc",
+  });
+  if (genreId) baseParams.set("with_genres", String(genreId));
+  if (status === "running") baseParams.set("with_status", "0");
+  if (status === "ended") baseParams.set("with_status", "3|4");
+  if (ratingMin) baseParams.set("vote_average.gte", String(ratingMin));
+  if (language) baseParams.set("with_original_language", language);
+  baseParams.set("vote_count.gte", String(RATING_MIN_VOTES));
+
+  // Fetch multiple pages in parallel
+  const pageNums = Array.from({ length: RATING_POOL_PAGES }, (_, i) => i + 1);
+
+  const [pages, genreMap] = await Promise.all([
+    Promise.all(
+      pageNums.map((p) => {
+        const params = new URLSearchParams(baseParams);
+        params.set("page", String(p));
+        return tmdbFetch<{ results: TMDBListResultRaw[]; total_pages: number }>(
+          `/discover/tv?${params.toString()}`,
+          true
+        ).catch(() => ({ results: [] as TMDBListResultRaw[], total_pages: 0 }));
+      })
+    ),
+    getGenreMap(),
+  ]);
+
+  // Merge all results, deduplicate by ID, then re-sort by rating desc
+  const seen = new Set<number>();
+  const allShows: TVMazeShow[] = [];
+  for (const p of pages) {
+    for (const r of p.results ?? []) {
+      if (!seen.has(r.id)) {
+        seen.add(r.id);
+        allShows.push(mapListResult(r, genreMap));
+      }
+    }
+  }
+
+  allShows.sort((a, b) => (b.rating.average ?? 0) - (a.rating.average ?? 0));
+
+  // Virtual pagination: slice the re-sorted pool
+  const totalShows = allShows.length;
+  const totalPages = Math.ceil(totalShows / RATING_PAGE_SIZE);
+  const start = (page - 1) * RATING_PAGE_SIZE;
+  const shows = allShows.slice(start, start + RATING_PAGE_SIZE);
+
+  return { shows, totalPages };
+}

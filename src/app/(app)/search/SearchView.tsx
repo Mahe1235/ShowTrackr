@@ -202,9 +202,6 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (ratingFilter !== "any") params.set("rating", ratingFilter);
       if (langFilter === "english") params.set("language", "en");
-      // When sorting by rating, require a minimum vote count so obscure shows
-      // with a handful of inflated votes don't dominate the list.
-      if (sortOption === "rating") params.set("vote_count", "50");
       return `/api/discover?${params.toString()}`;
     },
     [sortOption, statusFilter, ratingFilter, langFilter]
