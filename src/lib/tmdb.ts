@@ -68,22 +68,28 @@ interface TMDBSeasonRaw {
   episodes: TMDBEpisodeRaw[];
 }
 
+interface TMDBListResultRaw {
+  id: number;
+  name: string;
+  overview: string | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  first_air_date: string | null;
+  original_language: string;
+  genre_ids: number[];
+  vote_average: number;
+  popularity: number;
+  origin_country: string[];
+}
+
 interface TMDBSearchResultRaw {
-  results: Array<{
-    id: number;
-    name: string;
-    overview: string | null;
-    poster_path: string | null;
-    backdrop_path: string | null;
-    first_air_date: string | null;
-    original_language: string;
-    genre_ids: number[];
-    vote_average: number;
-    popularity: number;
-    origin_country: string[];
-  }>;
+  results: TMDBListResultRaw[];
   total_results: number;
   total_pages: number;
+}
+
+interface TMDBPopularResultRaw {
+  results: TMDBListResultRaw[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,6 +182,25 @@ function mapEpisode(raw: TMDBEpisodeRaw): TVMazeEpisode {
   };
 }
 
+// ── Genre ID → name map (fetched once, cached in module scope) ────────────────
+
+let _genreMap: Record<number, string> | null = null;
+
+async function getGenreMap(): Promise<Record<number, string>> {
+  if (_genreMap) return _genreMap;
+  try {
+    const data = await tmdbFetch<{ genres: TMDBGenre[] }>("/genre/tv/list");
+    _genreMap = Object.fromEntries(data.genres.map((g) => [g.id, g.name]));
+  } catch {
+    _genreMap = {};
+  }
+  return _genreMap;
+}
+
+function resolveGenres(ids: number[], map: Record<number, string>): string[] {
+  return ids.map((id) => map[id]).filter(Boolean) as string[];
+}
+
 // ── Fetch helper ──────────────────────────────────────────────────────────────
 
 async function tmdbFetch<T>(endpoint: string, noCache = false): Promise<T> {
@@ -193,10 +218,13 @@ async function tmdbFetch<T>(endpoint: string, noCache = false): Promise<T> {
 
 /** Search TV shows by query string */
 export async function searchShows(query: string): Promise<TVMazeSearchResult[]> {
-  const data = await tmdbFetch<TMDBSearchResultRaw>(
-    `/search/tv?query=${encodeURIComponent(query)}&page=1`,
-    true  // no cache on search — user expects fresh results
-  );
+  const [data, genreMap] = await Promise.all([
+    tmdbFetch<TMDBSearchResultRaw>(
+      `/search/tv?query=${encodeURIComponent(query)}&page=1`,
+      true  // no cache on search — user expects fresh results
+    ),
+    getGenreMap(),
+  ]);
 
   return (data.results ?? []).map((r) => ({
     score: r.popularity,
@@ -206,7 +234,7 @@ export async function searchShows(query: string): Promise<TVMazeSearchResult[]> 
       name:           r.name,
       type:           "Scripted",
       language:       mapLanguage(r.original_language),
-      genres:         [],   // genre_ids not expanded in search results
+      genres:         resolveGenres(r.genre_ids ?? [], genreMap),
       status:         "Unknown",
       runtime:        null,
       averageRuntime: null,
@@ -269,13 +297,45 @@ export async function getEpisodes(showId: number): Promise<TVMazeEpisode[]> {
 
 /** Get popular TV shows — fetches 3 pages (~60 shows) in parallel */
 export async function getPopularShows(): Promise<TVMazeShow[]> {
-  const pages = await Promise.all(
-    [1, 2, 3].map((p) =>
-      tmdbFetch<{ results: TMDBShowRaw[] }>(`/tv/popular?page=${p}`).catch(() => ({ results: [] }))
-    )
-  );
+  const [pages, genreMap] = await Promise.all([
+    Promise.all(
+      [1, 2, 3].map((p) =>
+        tmdbFetch<TMDBPopularResultRaw>(`/tv/popular?page=${p}`).catch(() => ({ results: [] }))
+      )
+    ),
+    getGenreMap(),
+  ]);
+
   const all = pages.flatMap((p) => p.results ?? []);
-  // Sort by TMDB popularity descending (already sorted per page, but merge may scramble order)
+  // Sort by TMDB popularity descending
   all.sort((a, b) => b.popularity - a.popularity);
-  return all.map(mapShow);
+
+  // Map list results (which have genre_ids) to TVMazeShow
+  return all.map((r) => ({
+    id:             r.id,
+    url:            `https://www.themoviedb.org/tv/${r.id}`,
+    name:           r.name,
+    type:           "Scripted",
+    language:       mapLanguage(r.original_language),
+    genres:         resolveGenres(r.genre_ids ?? [], genreMap),
+    status:         "Unknown",
+    runtime:        null,
+    averageRuntime: null,
+    premiered:      r.first_air_date ?? null,
+    ended:          null,
+    officialSite:   null,
+    schedule:       { time: "", days: [] },
+    rating:         { average: r.vote_average ?? null },
+    weight:         r.popularity ?? 0,
+    network:        null,
+    webChannel:     null,
+    externals:      { tvrage: null, thetvdb: null, imdb: null },
+    image: {
+      medium:   tmdbImage(r.poster_path, "w500"),
+      original: tmdbImage(r.poster_path, "original"),
+    },
+    summary:  r.overview ?? null,
+    updated:  0,
+    _links:   { self: { href: "" } },
+  } satisfies TVMazeShow));
 }
