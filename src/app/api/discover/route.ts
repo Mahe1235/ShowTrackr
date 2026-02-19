@@ -19,9 +19,12 @@ export async function GET(request: Request) {
   const rating   = searchParams.get("rating");
   const language = searchParams.get("language");
 
-  const genreId   = GENRE_MAP[genre] ?? undefined;
-  const sortBy    = SORT_MAP[sort] ?? "popularity.desc";
-  const ratingMin = rating ? parseFloat(rating) : undefined;
+  const voteCount = searchParams.get("vote_count");
+
+  const genreId      = GENRE_MAP[genre] ?? undefined;
+  const sortBy       = SORT_MAP[sort] ?? "popularity.desc";
+  const ratingMin    = rating ? parseFloat(rating) : undefined;
+  const voteCountMin = voteCount ? parseInt(voteCount, 10) : undefined;
 
   try {
     const result = await discoverShows({
@@ -31,6 +34,7 @@ export async function GET(request: Request) {
       status: status ?? undefined,
       ratingMin,
       language: language ?? undefined,
+      voteCountMin,
     });
     return NextResponse.json(result);
   } catch (err) {

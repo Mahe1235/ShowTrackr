@@ -24,6 +24,52 @@ const STATUS_CONFIG: Record<ShowStatus, { label: string; color: string }> = {
 
 const GENRES = ["Drama", "Comedy", "Crime", "Sci-Fi & Fantasy", "Action & Adventure", "Mystery", "Animation", "Documentary"];
 
+/** Compact card for top rated shows — includes rating badge */
+function TopRatedCard({ show, priority = false }: { show: TVMazeShow; priority?: boolean }) {
+  const imageUrl = show.image?.medium ?? show.image?.original ?? null;
+  const rating = show.rating?.average;
+  return (
+    <Link href={`/show/${show.id}`} className="block w-[110px] flex-shrink-0">
+      <motion.div
+        whileTap={{ scale: 0.95 }}
+        transition={{ type: "spring", stiffness: 400, damping: 25 }}
+        className="flex flex-col gap-1.5"
+      >
+        <div className="aspect-[2/3] rounded-xl overflow-hidden bg-bg-raised relative">
+          {imageUrl ? (
+            <Image
+              src={imageUrl}
+              alt={show.name}
+              fill
+              sizes="110px"
+              className="object-cover"
+              priority={priority}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center p-2">
+              <span className="text-text-muted text-[10px] text-center leading-relaxed line-clamp-3">
+                {show.name}
+              </span>
+            </div>
+          )}
+          {/* Rating badge */}
+          {rating !== null && rating !== undefined && (
+            <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-yellow-500/90 text-black backdrop-blur-sm flex items-center gap-0.5">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" className="flex-shrink-0">
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+              </svg>
+              {rating.toFixed(1)}
+            </div>
+          )}
+        </div>
+        <p className="text-text-primary text-xs font-medium leading-tight line-clamp-2 px-0.5">
+          {show.name}
+        </p>
+      </motion.div>
+    </Link>
+  );
+}
+
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 /** Compact horizontal-rail card for a TVMaze show (from popular shows) */
@@ -139,11 +185,12 @@ function SectionHeader({
 
 interface HomeViewProps {
   popularShows: TVMazeShow[];
+  topRatedShows: TVMazeShow[];
   userShows: UserShow[];
   isLoggedIn: boolean;
 }
 
-export default function HomeView({ popularShows, userShows, isLoggedIn }: HomeViewProps) {
+export default function HomeView({ popularShows, topRatedShows, userShows, isLoggedIn }: HomeViewProps) {
   const greeting = getGreeting();
 
   const watchingShows = userShows.filter((s) => s.status === "watching");
@@ -249,15 +296,36 @@ export default function HomeView({ popularShows, userShows, isLoggedIn }: HomeVi
         </div>
       )}
 
-      {/* ── Explore by Genre ────────────────────────────────────────────── */}
+      {/* ── Top Rated ──────────────────────────────────────────────────── */}
+      {topRatedShows.length > 0 && (
+        <div>
+          <SectionHeader
+            title="Top Rated"
+            href="/search?sort=rating&filters=1"
+            linkLabel="See all"
+          />
+          <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1">
+            {topRatedShows.slice(0, 15).map((show, i) => (
+              <TopRatedCard key={show.id} show={show} priority={i < 3} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Browse by Genre ──────────────────────────────────────────────── */}
       <div>
-        <SectionHeader title="Explore" />
-        <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1">
+        <SectionHeader title="Browse by Genre" href="/search" linkLabel="Discover" />
+        <div className="grid grid-cols-2 gap-2">
           {GENRES.map((genre) => (
             <Link
               key={genre}
               href={`/search?genre=${encodeURIComponent(genre)}`}
-              className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium border bg-bg-surface border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary transition-colors duration-150"
+              className="
+                px-4 py-3 rounded-xl text-sm font-medium
+                bg-bg-surface border border-white/5
+                text-text-secondary hover:text-text-primary hover:border-accent/30
+                transition-colors duration-150
+              "
             >
               {genre}
             </Link>

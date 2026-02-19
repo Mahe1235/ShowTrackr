@@ -1,22 +1,28 @@
 import { createClient } from "@/lib/supabase/server";
-import { getPopularShows } from "@/lib/tmdb";
+import { getPopularShows, getTopRatedShows } from "@/lib/tmdb";
 import PageWrapper from "@/components/layout/PageWrapper";
 import HomeView from "./HomeView";
 import type { TVMazeShow } from "@/types";
 import type { UserShow } from "@/types";
 
 export default async function DashboardPage() {
-  // Fetch popular shows (cached 1hr by TVMaze layer)
+  // Fetch popular + top rated shows in parallel (cached 1hr by TMDB layer)
   let popularShows: TVMazeShow[] = [];
+  let topRatedShows: TVMazeShow[] = [];
   try {
-    const all = await getPopularShows();
+    const [allPopular, topRated] = await Promise.all([
+      getPopularShows(),
+      getTopRatedShows(),
+    ]);
     // Sort by weight descending, take top 20
-    popularShows = all
+    popularShows = allPopular
       .slice()
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 20);
+    topRatedShows = topRated;
   } catch {
     popularShows = [];
+    topRatedShows = [];
   }
 
   // Fetch user's shows (if logged in)
@@ -39,6 +45,7 @@ export default async function DashboardPage() {
     <PageWrapper>
       <HomeView
         popularShows={popularShows}
+        topRatedShows={topRatedShows}
         userShows={userShows}
         isLoggedIn={!!user}
       />

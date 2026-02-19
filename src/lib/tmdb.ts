@@ -337,6 +337,16 @@ export async function getPopularShows(): Promise<TVMazeShow[]> {
   return all.map((r) => mapListResult(r, genreMap));
 }
 
+/** Get top-rated TV shows (single page, 20 results) */
+export async function getTopRatedShows(): Promise<TVMazeShow[]> {
+  const [data, genreMap] = await Promise.all([
+    tmdbFetch<TMDBPopularResultRaw>(`/tv/top_rated?page=1`),
+    getGenreMap(),
+  ]);
+
+  return (data.results ?? []).map((r) => mapListResult(r, genreMap));
+}
+
 /** Discover TV shows by genre (paginated, 20 per page) with optional server-side filters */
 export async function discoverShows(options: {
   genreId?: number;
@@ -345,8 +355,9 @@ export async function discoverShows(options: {
   status?: "running" | "ended";
   ratingMin?: number;
   language?: string;       // ISO 639-1 code, e.g. "en"
+  voteCountMin?: number;   // minimum vote count (filters out obscure shows)
 }): Promise<{ shows: TVMazeShow[]; totalPages: number }> {
-  const { genreId, page = 1, sortBy = "popularity.desc", status, ratingMin, language } = options;
+  const { genreId, page = 1, sortBy = "popularity.desc", status, ratingMin, language, voteCountMin } = options;
 
   const params = new URLSearchParams({
     sort_by: sortBy,
@@ -358,6 +369,7 @@ export async function discoverShows(options: {
   if (status === "ended") params.set("with_status", "3|4");
   if (ratingMin) params.set("vote_average.gte", String(ratingMin));
   if (language) params.set("with_original_language", language);
+  if (voteCountMin) params.set("vote_count.gte", String(voteCountMin));
 
   const [data, genreMap] = await Promise.all([
     tmdbFetch<{ results: TMDBListResultRaw[]; total_pages: number }>(

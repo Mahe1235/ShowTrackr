@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import ShowCard from "@/components/ui/ShowCard";
 import SkeletonCard, { SkeletonText } from "@/components/ui/SkeletonCard";
@@ -36,6 +36,10 @@ type SortOption    = "popularity" | "rating" | "year_desc" | "year_asc" | "name"
 type StatusFilter  = "all" | "running" | "ended";
 type RatingFilter  = "any" | "7" | "8";
 type LanguageFilter = "all" | "english";
+
+// Minimum number of votes required for a show to be sorted by rating.
+// Shows with fewer votes are pushed to the bottom because their score is unreliable.
+const MIN_VOTES_FOR_RATING = 50;
 
 interface SearchViewProps {
   popularShows: TVMazeShow[];
@@ -77,6 +81,11 @@ function applyFiltersAndSort(
       case "popularity":
         return b.weight - a.weight;
       case "rating": {
+        // Penalise shows with very few votes — they get unreliable scores
+        const aHasEnough = (a.weight ?? 0) >= MIN_VOTES_FOR_RATING;
+        const bHasEnough = (b.weight ?? 0) >= MIN_VOTES_FOR_RATING;
+        if (aHasEnough && !bHasEnough) return -1;
+        if (!aHasEnough && bHasEnough) return 1;
         const ra = a.rating.average ?? -1;
         const rb = b.rating.average ?? -1;
         return rb - ra;
@@ -107,10 +116,47 @@ function applyFiltersAndSort(
 
 export default function SearchView({ popularShows }: SearchViewProps) {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // ── URL search params are the SINGLE SOURCE OF TRUTH for filters ──────────
+  // This means navigating away and back always restores the filters because
+  // the browser URL retains them.
+  const activeGenre  = searchParams.get("genre") ?? null;
+  const sortOption   = (searchParams.get("sort") as SortOption) || "popularity";
+  const statusFilter = (searchParams.get("status") as StatusFilter) || "all";
+  const ratingFilter = (searchParams.get("rating") as RatingFilter) || "any";
+  const langFilter   = (searchParams.get("lang") as LanguageFilter) || "all";
+
+  const filtersOpen = searchParams.get("filters") === "1";
+
+  const activeFilterCount =
+    (sortOption    !== "popularity" ? 1 : 0) +
+    (statusFilter  !== "all"        ? 1 : 0) +
+    (ratingFilter  !== "any"        ? 1 : 0) +
+    (langFilter    !== "all"        ? 1 : 0);
+
+  // ── Helper: update one or more URL params (shallow replace, no scroll) ────
+  const setParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === null || value === "") {
+          params.delete(key);
+        } else {
+          params.set(key, value);
+        }
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [searchParams, pathname, router]
+  );
+
+  // ── Local state (not persisted in URL) ────────────────────────────────────
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TVMazeShow[]>([]);
   const [status, setStatus] = useState<SearchStatus>("idle");
-  const [activeGenre, setActiveGenre] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Genre discover state (server-paginated)
@@ -124,22 +170,6 @@ export default function SearchView({ popularShows }: SearchViewProps) {
 
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Pre-select genre from URL param (e.g. /search?genre=Drama)
-  useEffect(() => {
-    const genre = searchParams.get("genre");
-    if (genre) {
-      setActiveGenre(genre);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Filter / sort state
-  const [sortOption, setSortOption]     = useState<SortOption>("popularity");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [ratingFilter, setRatingFilter] = useState<RatingFilter>("any");
-  const [langFilter, setLangFilter]     = useState<LanguageFilter>("all");
-  const [filtersOpen, setFiltersOpen]   = useState(false);
-
   const isTyping = query.trim().length > 0;
 
   // Determine which shows to display
@@ -152,14 +182,8 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       : popularShows;
 
   const displayShows = (activeGenre && !isTyping)
-    ? baseShows // Genre: already filtered server-side, just apply client sort for name sort
+    ? baseShows // Genre: already filtered server-side
     : applyFiltersAndSort(baseShows, sortOption, statusFilter, ratingFilter, langFilter);
-
-  const activeFilterCount =
-    (sortOption    !== "popularity" ? 1 : 0) +
-    (statusFilter  !== "all"        ? 1 : 0) +
-    (ratingFilter  !== "any"        ? 1 : 0) +
-    (langFilter    !== "all"        ? 1 : 0);
 
   const isFilteredEmpty =
     (status === "idle" || status === "success") &&
@@ -168,17 +192,23 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     (activeGenre ? true : baseShows.length > 0);
 
   // ── Build discover URL with filters ────────────────────────────────────────
-  function buildDiscoverUrl(genre: string, page: number): string {
-    const params = new URLSearchParams({
-      genre,
-      page: String(page),
-    });
-    if (sortOption !== "popularity") params.set("sort", sortOption);
-    if (statusFilter !== "all") params.set("status", statusFilter);
-    if (ratingFilter !== "any") params.set("rating", ratingFilter);
-    if (langFilter === "english") params.set("language", "en");
-    return `/api/discover?${params.toString()}`;
-  }
+  const buildDiscoverUrl = useCallback(
+    (genre: string, page: number): string => {
+      const params = new URLSearchParams({
+        genre,
+        page: String(page),
+      });
+      if (sortOption !== "popularity") params.set("sort", sortOption);
+      if (statusFilter !== "all") params.set("status", statusFilter);
+      if (ratingFilter !== "any") params.set("rating", ratingFilter);
+      if (langFilter === "english") params.set("language", "en");
+      // When sorting by rating, require a minimum vote count so obscure shows
+      // with a handful of inflated votes don't dominate the list.
+      if (sortOption === "rating") params.set("vote_count", "50");
+      return `/api/discover?${params.toString()}`;
+    },
+    [sortOption, statusFilter, ratingFilter, langFilter]
+  );
 
   // ── Fetch genre discover results from /api/discover ────────────────────────
   const fetchGenre = useCallback(async (url: string, append: boolean) => {
@@ -278,15 +308,15 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     observer.observe(sentinel);
     return () => observer.disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGenre, isTyping, genreLoading, genrePage, genreTotalPages, sortOption, statusFilter, ratingFilter, langFilter]);
+  }, [activeGenre, isTyping, genreLoading, genrePage, genreTotalPages, buildDiscoverUrl]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function handleGenreClick(genre: string) {
     if (activeGenre === genre) {
-      setActiveGenre(null);
+      setParams({ genre: null });
     } else {
-      setActiveGenre(genre);
+      setParams({ genre });
       setQuery("");
     }
   }
@@ -294,15 +324,21 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     setQuery(e.target.value);
     if (activeGenre !== null) {
-      setActiveGenre(null);
+      setParams({ genre: null });
     }
   }
 
   function handleResetFilters() {
-    setSortOption("popularity");
-    setStatusFilter("all");
-    setRatingFilter("any");
-    setLangFilter("all");
+    setParams({
+      sort: null,
+      status: null,
+      rating: null,
+      lang: null,
+    });
+  }
+
+  function toggleFiltersOpen() {
+    setParams({ filters: filtersOpen ? null : "1" });
   }
 
   // ── Computed display values ────────────────────────────────────────────────
@@ -400,7 +436,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         {/* Toggle row */}
         <div className="flex items-center justify-between">
           <button
-            onClick={() => setFiltersOpen((prev) => !prev)}
+            onClick={toggleFiltersOpen}
             className={`
               flex items-center gap-2 px-3.5 py-1.5
               border rounded-xl text-xs font-medium
@@ -468,7 +504,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
                     ).map(({ value, label }) => (
                       <button
                         key={value}
-                        onClick={() => setSortOption(value)}
+                        onClick={() =>
+                          setParams({ sort: value === "popularity" ? null : value })
+                        }
                         className={`
                           flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium
                           border transition-colors duration-150
@@ -493,7 +531,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
                     {(["all", "running", "ended"] as StatusFilter[]).map((v) => (
                       <button
                         key={v}
-                        onClick={() => setStatusFilter(v)}
+                        onClick={() =>
+                          setParams({ status: v === "all" ? null : v })
+                        }
                         className={`
                           px-3 py-1.5 rounded-xl text-xs font-medium capitalize
                           border transition-colors duration-150
@@ -524,7 +564,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
                     ).map(({ value, label }) => (
                       <button
                         key={value}
-                        onClick={() => setRatingFilter(value)}
+                        onClick={() =>
+                          setParams({ rating: value === "any" ? null : value })
+                        }
                         className={`
                           px-3 py-1.5 rounded-xl text-xs font-medium
                           border transition-colors duration-150
@@ -554,7 +596,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
                     ).map(({ value, label }) => (
                       <button
                         key={value}
-                        onClick={() => setLangFilter(value)}
+                        onClick={() =>
+                          setParams({ lang: value === "all" ? null : value })
+                        }
                         className={`
                           px-3 py-1.5 rounded-xl text-xs font-medium
                           border transition-colors duration-150
