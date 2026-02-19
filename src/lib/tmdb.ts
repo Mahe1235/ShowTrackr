@@ -21,7 +21,9 @@ const IMG  = "https://image.tmdb.org/t/p";
 function authHeaders() {
   const key = process.env.TMDB_API_KEY;
   if (!key) throw new Error("TMDB_API_KEY is not set");
-  return { Authorization: key };
+  // Accept the token with or without the "Bearer " prefix in the env var
+  const value = key.startsWith("Bearer ") ? key : `Bearer ${key}`;
+  return { Authorization: value };
 }
 
 // ── Raw TMDB response shapes (internal only) ──────────────────────────────────
