@@ -118,12 +118,12 @@ export default function SettingsView({ userEmail }: SettingsViewProps) {
           <p className="text-xs text-text-muted text-center">
             Show data from{" "}
             <Link
-              href="https://www.tvmaze.com"
+              href="https://www.themoviedb.org"
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent"
             >
-              TVMaze
+              TMDB
             </Link>
           </p>
         </div>

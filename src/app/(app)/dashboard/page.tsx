@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getPopularShows } from "@/lib/tvmaze";
+import { getPopularShows } from "@/lib/tmdb";
 import PageWrapper from "@/components/layout/PageWrapper";
 import HomeView from "./HomeView";
 import type { TVMazeShow } from "@/types";

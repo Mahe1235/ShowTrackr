@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import PageWrapper from "@/components/layout/PageWrapper";
 import SearchView from "./SearchView";
-import { getPopularShows } from "@/lib/tvmaze";
+import { getPopularShows } from "@/lib/tmdb";
 import type { TVMazeShow } from "@/types";
 
 export default async function SearchPage() {

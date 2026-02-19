@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import ShowDetail from "./ShowDetail";
-import { getShowWithNextEpisode, getEpisodes } from "@/lib/tvmaze";
+import { getShowWithNextEpisode, getEpisodes } from "@/lib/tmdb";
 import type { TVMazeShow, TVMazeEpisode } from "@/types";
 
 export default async function ShowDetailPage({

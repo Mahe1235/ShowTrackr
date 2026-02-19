@@ -1,0 +1,279 @@
+/**
+ * TMDB (The Movie Database) API layer
+ * Exports the same function signatures as the old tvmaze.ts so all
+ * consuming pages/components need zero changes.
+ *
+ * Auth: Bearer token via TMDB_API_KEY env var (server-only).
+ * Images: TMDB returns relative paths — tmdbImage() prefixes the CDN base.
+ */
+
+import type {
+  TVMazeShow,
+  TVMazeEpisode,
+  TVMazeSearchResult,
+} from "@/types";
+
+// ── Config ────────────────────────────────────────────────────────────────────
+
+const BASE = "https://api.themoviedb.org/3";
+const IMG  = "https://image.tmdb.org/t/p";
+
+function authHeaders() {
+  const key = process.env.TMDB_API_KEY;
+  if (!key) throw new Error("TMDB_API_KEY is not set");
+  return { Authorization: key };
+}
+
+// ── Raw TMDB response shapes (internal only) ──────────────────────────────────
+
+interface TMDBGenre  { id: number; name: string }
+interface TMDBNetwork { id: number; name: string; origin_country: string }
+
+interface TMDBEpisodeRaw {
+  id: number;
+  name: string;
+  season_number: number;
+  episode_number: number;
+  air_date: string | null;
+  runtime: number | null;
+  overview: string | null;
+}
+
+interface TMDBShowRaw {
+  id: number;
+  name: string;
+  overview: string | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  first_air_date: string | null;
+  last_air_date: string | null;
+  status: string;
+  original_language: string;
+  genres: TMDBGenre[];
+  networks: TMDBNetwork[];
+  episode_run_time: number[];
+  vote_average: number;
+  vote_count: number;
+  popularity: number;
+  number_of_seasons: number;
+  number_of_episodes: number;
+  next_episode_to_air: TMDBEpisodeRaw | null;
+  last_episode_to_air: TMDBEpisodeRaw | null;
+}
+
+interface TMDBSeasonRaw {
+  season_number: number;
+  episodes: TMDBEpisodeRaw[];
+}
+
+interface TMDBSearchResultRaw {
+  results: Array<{
+    id: number;
+    name: string;
+    overview: string | null;
+    poster_path: string | null;
+    backdrop_path: string | null;
+    first_air_date: string | null;
+    original_language: string;
+    genre_ids: number[];
+    vote_average: number;
+    popularity: number;
+    origin_country: string[];
+  }>;
+  total_results: number;
+  total_pages: number;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function tmdbImage(path: string | null, size = "w500"): string | null {
+  if (!path) return null;
+  return `${IMG}/${size}${path}`;
+}
+
+const LANG_MAP: Record<string, string> = {
+  en: "English", fr: "French",  es: "Spanish",    de: "German",
+  ja: "Japanese", ko: "Korean", pt: "Portuguese",  it: "Italian",
+  zh: "Chinese",  ar: "Arabic", hi: "Hindi",       ru: "Russian",
+  nl: "Dutch",    sv: "Swedish", da: "Danish",      tr: "Turkish",
+  pl: "Polish",   no: "Norwegian",
+};
+
+const STATUS_MAP: Record<string, string> = {
+  "Returning Series": "Running",
+  "Ended":            "Ended",
+  "Canceled":         "Ended",
+  "In Production":    "In Development",
+  "Planned":          "In Development",
+  "Pilot":            "In Development",
+};
+
+function mapStatus(raw: string): string {
+  return STATUS_MAP[raw] ?? raw;
+}
+
+function mapLanguage(code: string): string {
+  return LANG_MAP[code] ?? code.toUpperCase();
+}
+
+/** Map a raw TMDB show to the TVMazeShow shape used throughout the app */
+function mapShow(raw: TMDBShowRaw): TVMazeShow {
+  const nextEp = raw.next_episode_to_air
+    ? mapEpisode(raw.next_episode_to_air)
+    : undefined;
+
+  return {
+    id:             raw.id,
+    url:            `https://www.themoviedb.org/tv/${raw.id}`,
+    name:           raw.name,
+    type:           "Scripted",
+    language:       mapLanguage(raw.original_language),
+    genres:         raw.genres?.map((g) => g.name) ?? [],
+    status:         mapStatus(raw.status),
+    runtime:        raw.episode_run_time?.[0] ?? null,
+    averageRuntime: raw.episode_run_time?.[0] ?? null,
+    premiered:      raw.first_air_date ?? null,
+    ended:          raw.last_air_date ?? null,
+    officialSite:   null,
+    schedule:       { time: "", days: [] },
+    rating:         { average: raw.vote_average ?? null },
+    weight:         raw.popularity ?? 0,
+    network:        raw.networks?.[0]
+      ? { id: raw.networks[0].id, name: raw.networks[0].name, country: null, officialSite: null }
+      : null,
+    webChannel:     null,
+    externals:      { tvrage: null, thetvdb: null, imdb: null },
+    image: {
+      medium:   tmdbImage(raw.poster_path, "w500"),
+      original: tmdbImage(raw.poster_path, "original"),
+    },
+    summary: raw.overview ?? null,
+    updated: 0,
+    _links:  { self: { href: "" } },
+    ...(nextEp ? { _embedded: { nextepisode: nextEp } } : {}),
+  };
+}
+
+/** Map a raw TMDB episode to the TVMazeEpisode shape */
+function mapEpisode(raw: TMDBEpisodeRaw): TVMazeEpisode {
+  return {
+    id:       raw.id,
+    url:      "",
+    name:     raw.name ?? "",
+    season:   raw.season_number,
+    number:   raw.episode_number,
+    type:     "regular",
+    airdate:  raw.air_date ?? "",
+    airtime:  "",
+    airstamp: raw.air_date ? `${raw.air_date}T00:00:00+00:00` : null,
+    runtime:  raw.runtime ?? null,
+    rating:   { average: null },
+    image:    null,
+    summary:  raw.overview ?? null,
+    _links:   { self: { href: "" } },
+  };
+}
+
+// ── Fetch helper ──────────────────────────────────────────────────────────────
+
+async function tmdbFetch<T>(endpoint: string, noCache = false): Promise<T> {
+  const res = await fetch(`${BASE}${endpoint}`, {
+    headers: authHeaders(),
+    next: noCache ? { revalidate: 0 } : { revalidate: 3600 },
+  });
+  if (!res.ok) {
+    throw new Error(`TMDB API error: ${res.status} ${res.statusText} (${endpoint})`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── Public API (same signatures as old tvmaze.ts) ─────────────────────────────
+
+/** Search TV shows by query string */
+export async function searchShows(query: string): Promise<TVMazeSearchResult[]> {
+  const data = await tmdbFetch<TMDBSearchResultRaw>(
+    `/search/tv?query=${encodeURIComponent(query)}&page=1`,
+    true  // no cache on search — user expects fresh results
+  );
+
+  return (data.results ?? []).map((r) => ({
+    score: r.popularity,
+    show: {
+      id:             r.id,
+      url:            `https://www.themoviedb.org/tv/${r.id}`,
+      name:           r.name,
+      type:           "Scripted",
+      language:       mapLanguage(r.original_language),
+      genres:         [],   // genre_ids not expanded in search results
+      status:         "Unknown",
+      runtime:        null,
+      averageRuntime: null,
+      premiered:      r.first_air_date ?? null,
+      ended:          null,
+      officialSite:   null,
+      schedule:       { time: "", days: [] },
+      rating:         { average: r.vote_average ?? null },
+      weight:         r.popularity ?? 0,
+      network:        null,
+      webChannel:     null,
+      externals:      { tvrage: null, thetvdb: null, imdb: null },
+      image: {
+        medium:   tmdbImage(r.poster_path, "w500"),
+        original: tmdbImage(r.poster_path, "original"),
+      },
+      summary:  r.overview ?? null,
+      updated:  0,
+      _links:   { self: { href: "" } },
+    } satisfies TVMazeShow,
+  }));
+}
+
+/** Get full show details by TMDB ID */
+export async function getShow(id: number): Promise<TVMazeShow> {
+  const raw = await tmdbFetch<TMDBShowRaw>(`/tv/${id}`);
+  return mapShow(raw);
+}
+
+/** Get show details — TMDB includes next_episode_to_air inline, so same as getShow */
+export async function getShowWithNextEpisode(id: number): Promise<TVMazeShow> {
+  const raw = await tmdbFetch<TMDBShowRaw>(`/tv/${id}`);
+  return mapShow(raw);
+}
+
+/** Get all episodes for a show (fetches each season in parallel) */
+export async function getEpisodes(showId: number): Promise<TVMazeEpisode[]> {
+  // First get the show to find number_of_seasons
+  const show = await tmdbFetch<TMDBShowRaw>(`/tv/${showId}`);
+  const numSeasons = show.number_of_seasons ?? 0;
+  if (numSeasons === 0) return [];
+
+  // Fetch all seasons in parallel
+  const seasonNums = Array.from({ length: numSeasons }, (_, i) => i + 1);
+  const seasons = await Promise.all(
+    seasonNums.map((n) =>
+      tmdbFetch<TMDBSeasonRaw>(`/tv/${showId}/season/${n}`).catch(() => null)
+    )
+  );
+
+  // Flatten to a single episode list, filter out specials (season 0)
+  return seasons
+    .filter((s): s is TMDBSeasonRaw => s !== null && s.season_number > 0)
+    .flatMap((s) =>
+      (s.episodes ?? [])
+        .filter((ep) => ep.episode_number > 0)
+        .map(mapEpisode)
+    );
+}
+
+/** Get popular TV shows — fetches 3 pages (~60 shows) in parallel */
+export async function getPopularShows(): Promise<TVMazeShow[]> {
+  const pages = await Promise.all(
+    [1, 2, 3].map((p) =>
+      tmdbFetch<{ results: TMDBShowRaw[] }>(`/tv/popular?page=${p}`).catch(() => ({ results: [] }))
+    )
+  );
+  const all = pages.flatMap((p) => p.results ?? []);
+  // Sort by TMDB popularity descending (already sorted per page, but merge may scramble order)
+  all.sort((a, b) => b.popularity - a.popularity);
+  return all.map(mapShow);
+}
