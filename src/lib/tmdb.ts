@@ -201,6 +201,37 @@ function resolveGenres(ids: number[], map: Record<number, string>): string[] {
   return ids.map((id) => map[id]).filter(Boolean) as string[];
 }
 
+/** Map a TMDB list/search result (with genre_ids) to TVMazeShow */
+function mapListResult(r: TMDBListResultRaw, genreMap: Record<number, string>): TVMazeShow {
+  return {
+    id:             r.id,
+    url:            `https://www.themoviedb.org/tv/${r.id}`,
+    name:           r.name,
+    type:           "Scripted",
+    language:       mapLanguage(r.original_language),
+    genres:         resolveGenres(r.genre_ids ?? [], genreMap),
+    status:         "Unknown",
+    runtime:        null,
+    averageRuntime: null,
+    premiered:      r.first_air_date ?? null,
+    ended:          null,
+    officialSite:   null,
+    schedule:       { time: "", days: [] },
+    rating:         { average: r.vote_average ?? null },
+    weight:         r.popularity ?? 0,
+    network:        null,
+    webChannel:     null,
+    externals:      { tvrage: null, thetvdb: null, imdb: null },
+    image: {
+      medium:   tmdbImage(r.poster_path, "w500"),
+      original: tmdbImage(r.poster_path, "original"),
+    },
+    summary:  r.overview ?? null,
+    updated:  0,
+    _links:   { self: { href: "" } },
+  };
+}
+
 // ── Fetch helper ──────────────────────────────────────────────────────────────
 
 async function tmdbFetch<T>(endpoint: string, noCache = false): Promise<T> {
@@ -228,33 +259,7 @@ export async function searchShows(query: string): Promise<TVMazeSearchResult[]> 
 
   return (data.results ?? []).map((r) => ({
     score: r.popularity,
-    show: {
-      id:             r.id,
-      url:            `https://www.themoviedb.org/tv/${r.id}`,
-      name:           r.name,
-      type:           "Scripted",
-      language:       mapLanguage(r.original_language),
-      genres:         resolveGenres(r.genre_ids ?? [], genreMap),
-      status:         "Unknown",
-      runtime:        null,
-      averageRuntime: null,
-      premiered:      r.first_air_date ?? null,
-      ended:          null,
-      officialSite:   null,
-      schedule:       { time: "", days: [] },
-      rating:         { average: r.vote_average ?? null },
-      weight:         r.popularity ?? 0,
-      network:        null,
-      webChannel:     null,
-      externals:      { tvrage: null, thetvdb: null, imdb: null },
-      image: {
-        medium:   tmdbImage(r.poster_path, "w500"),
-        original: tmdbImage(r.poster_path, "original"),
-      },
-      summary:  r.overview ?? null,
-      updated:  0,
-      _links:   { self: { href: "" } },
-    } satisfies TVMazeShow,
+    show: mapListResult(r, genreMap),
   }));
 }
 
@@ -295,6 +300,27 @@ export async function getEpisodes(showId: number): Promise<TVMazeEpisode[]> {
     );
 }
 
+// ── Genre ID → name map (exported for UI usage) ──────────────────────────────
+
+export const GENRE_MAP: Record<string, number> = {
+  "Drama":              18,
+  "Comedy":             35,
+  "Crime":              80,
+  "Sci-Fi & Fantasy":   10765,
+  "Action & Adventure": 10759,
+  "Mystery":            9648,
+  "Animation":          16,
+  "Documentary":        99,
+  "Reality":            10764,
+  "Kids":               10762,
+  "News":               10763,
+  "Talk":               10767,
+  "Family":             10751,
+  "War & Politics":     10768,
+  "Western":            37,
+  "Soap":               10766,
+};
+
 /** Get popular TV shows — fetches 3 pages (~60 shows) in parallel */
 export async function getPopularShows(): Promise<TVMazeShow[]> {
   const [pages, genreMap] = await Promise.all([
@@ -307,35 +333,34 @@ export async function getPopularShows(): Promise<TVMazeShow[]> {
   ]);
 
   const all = pages.flatMap((p) => p.results ?? []);
-  // Sort by TMDB popularity descending
   all.sort((a, b) => b.popularity - a.popularity);
+  return all.map((r) => mapListResult(r, genreMap));
+}
 
-  // Map list results (which have genre_ids) to TVMazeShow
-  return all.map((r) => ({
-    id:             r.id,
-    url:            `https://www.themoviedb.org/tv/${r.id}`,
-    name:           r.name,
-    type:           "Scripted",
-    language:       mapLanguage(r.original_language),
-    genres:         resolveGenres(r.genre_ids ?? [], genreMap),
-    status:         "Unknown",
-    runtime:        null,
-    averageRuntime: null,
-    premiered:      r.first_air_date ?? null,
-    ended:          null,
-    officialSite:   null,
-    schedule:       { time: "", days: [] },
-    rating:         { average: r.vote_average ?? null },
-    weight:         r.popularity ?? 0,
-    network:        null,
-    webChannel:     null,
-    externals:      { tvrage: null, thetvdb: null, imdb: null },
-    image: {
-      medium:   tmdbImage(r.poster_path, "w500"),
-      original: tmdbImage(r.poster_path, "original"),
-    },
-    summary:  r.overview ?? null,
-    updated:  0,
-    _links:   { self: { href: "" } },
-  } satisfies TVMazeShow));
+/** Discover TV shows by genre (paginated, 20 per page) */
+export async function discoverShows(options: {
+  genreId?: number;
+  page?: number;
+  sortBy?: string;
+}): Promise<{ shows: TVMazeShow[]; totalPages: number }> {
+  const { genreId, page = 1, sortBy = "popularity.desc" } = options;
+
+  const params = new URLSearchParams({
+    sort_by: sortBy,
+    page: String(page),
+  });
+  if (genreId) params.set("with_genres", String(genreId));
+
+  const [data, genreMap] = await Promise.all([
+    tmdbFetch<{ results: TMDBListResultRaw[]; total_pages: number }>(
+      `/discover/tv?${params.toString()}`,
+      true // no stale cache — user navigates between genres frequently
+    ),
+    getGenreMap(),
+  ]);
+
+  return {
+    shows: (data.results ?? []).map((r) => mapListResult(r, genreMap)),
+    totalPages: data.total_pages ?? 0,
+  };
 }

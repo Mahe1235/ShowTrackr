@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import ShowCard from "@/components/ui/ShowCard";
@@ -108,13 +108,20 @@ function applyFiltersAndSort(
 export default function SearchView({ popularShows }: SearchViewProps) {
   const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<TVMazeShow[]>([]);
+  const [searchResults, setSearchResults] = useState<TVMazeShow[]>([]);
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [activeGenre, setActiveGenre] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Infinite scroll
+  // Genre discover state (server-paginated)
+  const [genreShows, setGenreShows] = useState<TVMazeShow[]>([]);
+  const [genrePage, setGenrePage] = useState(1);
+  const [genreTotalPages, setGenreTotalPages] = useState(0);
+  const [genreLoading, setGenreLoading] = useState(false);
+
+  // Popular shows infinite scroll (client-side virtual pagination)
   const [visibleCount, setVisibleCount] = useState(20);
+
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   // Pre-select genre from URL param (e.g. /search?genre=Drama)
@@ -133,19 +140,14 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const [langFilter, setLangFilter]     = useState<LanguageFilter>("all");
   const [filtersOpen, setFiltersOpen]   = useState(false);
 
-  const isTyping    = query.trim().length > 0;
-  const isSearching = isTyping || activeGenre !== null;
+  const isTyping = query.trim().length > 0;
 
-  // Genre chips always filter client-side from popularShows (or from typed search results)
-  const baseShows = (() => {
-    const source = isTyping ? results : popularShows;
-    if (activeGenre) {
-      return source.filter((s) =>
-        s.genres.some((g) => g.toLowerCase() === activeGenre.toLowerCase())
-      );
-    }
-    return source;
-  })();
+  // Determine which shows to display
+  const baseShows = isTyping
+    ? searchResults
+    : activeGenre
+      ? genreShows
+      : popularShows;
 
   const displayShows = applyFiltersAndSort(
     baseShows,
@@ -164,73 +166,107 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const isFilteredEmpty =
     (status === "idle" || status === "success") &&
     displayShows.length === 0 &&
-    (popularShows.length > 0 || results.length > 0);
+    baseShows.length > 0;
 
-  // Only fire API search for typed queries — genre chips filter client-side
+  // ── Fetch genre discover results from /api/discover ────────────────────────
+  const fetchGenre = useCallback(async (genre: string, page: number, append: boolean) => {
+    setGenreLoading(true);
+    try {
+      const res = await fetch(
+        `/api/discover?genre=${encodeURIComponent(genre)}&page=${page}`
+      );
+      if (!res.ok) throw new Error("Discover failed");
+      const data: { shows: TVMazeShow[]; totalPages: number } = await res.json();
+
+      if (append) {
+        setGenreShows((prev) => [...prev, ...data.shows]);
+      } else {
+        setGenreShows(data.shows);
+      }
+      setGenreTotalPages(data.totalPages);
+      setGenrePage(page);
+    } catch {
+      if (!append) setGenreShows([]);
+    } finally {
+      setGenreLoading(false);
+    }
+  }, []);
+
+  // When genre changes, fetch page 1
+  useEffect(() => {
+    if (activeGenre && !isTyping) {
+      setGenreShows([]);
+      setGenrePage(1);
+      setGenreTotalPages(0);
+      setStatus("idle");
+      fetchGenre(activeGenre, 1, false);
+    }
+  }, [activeGenre, isTyping, fetchGenre]);
+
+  // ── Typed search query → /api/search ───────────────────────────────────────
   useEffect(() => {
     const trimmed = query.trim();
-
-    // Reset visible count whenever search term or genre changes
     setVisibleCount(20);
 
     if (trimmed.length === 0) {
       setStatus("idle");
-      setResults([]);
+      setSearchResults([]);
       return;
     }
 
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setStatus("loading");
 
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
         if (!res.ok) throw new Error("Search failed");
-        const data: Array<{ show: import("@/types").TVMazeShow }> = await res.json();
+        const data: Array<{ show: TVMazeShow }> = await res.json();
         const shows = data.map((r) => r.show);
         if (shows.length === 0) {
           setStatus("empty");
-          setResults([]);
+          setSearchResults([]);
         } else {
-          setResults(shows);
+          setSearchResults(shows);
           setStatus("success");
         }
       } catch {
         setStatus("error");
-        setResults([]);
+        setSearchResults([]);
       }
     }, 300);
 
     return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
 
-  // Reset visible count when genre changes too
-  useEffect(() => {
-    setVisibleCount(20);
-  }, [activeGenre]);
-
-  // Infinite scroll — reveal 20 more popular shows when sentinel enters viewport
+  // ── Infinite scroll ────────────────────────────────────────────────────────
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
+
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisibleCount((prev) => Math.min(prev + 20, displayShows.length));
+        if (!entries[0].isIntersecting) return;
+
+        if (activeGenre && !isTyping) {
+          // Server-side pagination: load next page from TMDB discover
+          if (!genreLoading && genrePage < genreTotalPages) {
+            fetchGenre(activeGenre, genrePage + 1, true);
+          }
+        } else {
+          // Client-side virtual pagination for popular/search results
+          setVisibleCount((prev) => prev + 20);
         }
       },
       { threshold: 0.1 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [displayShows.length]);
+  }, [activeGenre, isTyping, genreLoading, genrePage, genreTotalPages, fetchGenre]);
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   function handleGenreClick(genre: string) {
     if (activeGenre === genre) {
@@ -254,6 +290,31 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     setRatingFilter("any");
     setLangFilter("all");
   }
+
+  // ── Computed display values ────────────────────────────────────────────────
+
+  // For popular shows & search: slice by visibleCount. For genre: show all loaded.
+  const showsToRender = (activeGenre && !isTyping)
+    ? displayShows
+    : displayShows.slice(0, visibleCount);
+
+  // Show sentinel when there's more to load
+  const hasMore = (activeGenre && !isTyping)
+    ? genrePage < genreTotalPages
+    : visibleCount < displayShows.length;
+
+  // Determine section label
+  const sectionLabel = (() => {
+    if (status === "loading") return "Searching...";
+    if (status === "empty") return "No Results";
+    if (status === "error") return "Something went wrong";
+    if (isTyping && status === "success") return `Results for "${query}"`;
+    if (activeGenre) return `${activeGenre} Shows`;
+    return "Popular Shows";
+  })();
+
+  // Initial genre load shows skeletons
+  const showGenreSkeletons = activeGenre && !isTyping && genreLoading && genreShows.length === 0;
 
   return (
     <div className="flex flex-col gap-6 pt-12 pb-6">
@@ -505,17 +566,11 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       <div>
         {/* Section label */}
         <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
-          {status === "idle" && !activeGenre && "Popular Shows"}
-          {status === "idle" && activeGenre && `${activeGenre} Shows`}
-          {status === "loading" && "Searching..."}
-          {status === "success" && !activeGenre && `Results for "${query}"`}
-          {status === "success" && activeGenre && `${activeGenre} · Results for "${query}"`}
-          {status === "empty" && "No Results"}
-          {status === "error" && "Something went wrong"}
+          {sectionLabel}
         </p>
 
-        {/* Loading skeletons */}
-        {status === "loading" && (
+        {/* Loading skeletons — search or initial genre load */}
+        {(status === "loading" || showGenreSkeletons) && (
           <div className="grid grid-cols-2 gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="flex flex-col gap-2">
@@ -544,7 +599,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         )}
 
         {/* Show grid */}
-        {(status === "idle" || status === "success") && (
+        {(status === "idle" || status === "success") && !showGenreSkeletons && (
           <>
             {isFilteredEmpty ? (
               <div className="py-16 flex flex-col items-center gap-2 text-center">
@@ -562,22 +617,26 @@ export default function SearchView({ popularShows }: SearchViewProps) {
             ) : (
               <AnimatePresence mode="wait">
                 <motion.div
-                  key={isSearching ? "results" : "popular"}
+                  key={activeGenre ?? (isTyping ? "search" : "popular")}
                   variants={gridContainerVariants}
                   initial="hidden"
                   animate="show"
                   className="grid grid-cols-2 gap-3"
                 >
-                  {displayShows.slice(0, visibleCount).map((show, index) => (
+                  {showsToRender.map((show, index) => (
                     <ShowCard key={show.id} show={show} priority={index < 4} />
                   ))}
                 </motion.div>
               </AnimatePresence>
             )}
 
-            {/* Sentinel — IntersectionObserver watches this to load more */}
-            {visibleCount < displayShows.length && (
-              <div ref={sentinelRef} className="h-8 mt-2" />
+            {/* Sentinel — loads more on scroll (server pages for genre, client virtual for others) */}
+            {hasMore && (
+              <div ref={sentinelRef} className="h-8 mt-2 flex items-center justify-center">
+                {genreLoading && (
+                  <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                )}
+              </div>
             )}
           </>
         )}
