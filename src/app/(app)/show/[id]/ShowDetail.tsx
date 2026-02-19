@@ -1,10 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
+import {
+  fetchWatchedEpisodes,
+  markEpisodeWatched,
+  unmarkEpisodeWatched,
+  markSeasonWatched,
+  markAllWatched,
+  unmarkSeasonWatched,
+  episodeKey,
+} from "@/lib/watch-progress";
 import type { TVMazeShow, TVMazeEpisode, ShowStatus } from "@/types";
 
 // ── Pure utility functions ──────────────────────────────────────────────────
@@ -45,6 +54,21 @@ function formatDate(dateStr: string): string {
     month: "short",
     day: "numeric",
   });
+}
+
+/** Check whether an episode has already aired */
+function isEpisodeReleased(ep: TVMazeEpisode): boolean {
+  if (!ep.airdate) return false;
+  return new Date(ep.airdate + "T00:00:00") <= new Date();
+}
+
+/** Check whether an upcoming episode airs within 30 days */
+function isNextEpisodeSoon(ep: TVMazeEpisode): boolean {
+  if (!ep.airdate) return false;
+  const airDate = new Date(ep.airdate + "T00:00:00");
+  const now = new Date();
+  const diffMs = airDate.getTime() - now.getTime();
+  return diffMs > 0 && diffMs <= 30 * 24 * 60 * 60 * 1000;
 }
 
 // ── Tracking constants (outside component — stable across renders) ──────────
@@ -134,6 +158,13 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
   const [sheetOpen, setSheetOpen]           = useState(false);
   const [isMutating, setIsMutating]         = useState(false);
 
+  // ── Watch progress state ──
+  const [watchedSet, setWatchedSet]         = useState<Set<string>>(new Set());
+  const [watchLoading, setWatchLoading]     = useState(true);
+  const [watchMutating, setWatchMutating]   = useState<Set<string>>(new Set());
+  // Ref to prevent auto-complete from firing during bulk "Mark Completed" action
+  const bulkMarkingRef                      = useRef(false);
+
   // ── Derived values ──
   const imageUrl = show.image?.original ?? show.image?.medium ?? null;
   const networkName = show.network?.name ?? show.webChannel?.name ?? null;
@@ -170,6 +201,20 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
     }
     check();
   }, [show.id]);
+
+  // ── Load watch progress when tracking status is available ──
+  useEffect(() => {
+    // Only fetch when the show is tracked
+    if (trackingStatus === undefined || trackingStatus === null) {
+      setWatchLoading(false);
+      return;
+    }
+    setWatchLoading(true);
+    fetchWatchedEpisodes(show.id)
+      .then((set) => setWatchedSet(set))
+      .catch(() => setWatchedSet(new Set()))
+      .finally(() => setWatchLoading(false));
+  }, [show.id, trackingStatus]);
 
   // ── Body scroll lock when sheet is open ──
   useEffect(() => {
@@ -214,13 +259,32 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
         { onConflict: "user_id,tvmaze_show_id" }
       );
       if (error) throw error;
+
+      // When marking "Completed", bulk-mark all released episodes as watched
+      if (newStatus === "completed") {
+        bulkMarkingRef.current = true;
+        const released = episodes.filter(
+          (e) => isEpisodeReleased(e) && e.number !== null
+        );
+        if (released.length > 0) {
+          await markAllWatched(
+            show.id,
+            released.map((e) => ({ season: e.season, episode: e.number! }))
+          );
+          setWatchedSet(
+            new Set(released.map((e) => episodeKey(e.season, e.number!)))
+          );
+        }
+        bulkMarkingRef.current = false;
+      }
+
       router.refresh();
     } catch {
       setTrackingStatus(prev);
     } finally {
       setIsMutating(false);
     }
-  }, [trackingStatus, show, router]);
+  }, [trackingStatus, show, router, episodes]);
 
   const handleRemove = useCallback(async () => {
     const prev = trackingStatus;
@@ -237,6 +301,8 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
         .eq("tvmaze_show_id", show.id)
         .eq("user_id", user.id);
       if (error) throw error;
+      // Clear local watch state (DB records preserved for re-add)
+      setWatchedSet(new Set());
       router.refresh();
     } catch {
       setTrackingStatus(prev);
@@ -244,6 +310,127 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
       setIsMutating(false);
     }
   }, [trackingStatus, show.id, router]);
+
+  // ── Episode toggle ──
+  const toggleEpisode = useCallback(
+    async (ep: TVMazeEpisode) => {
+      if (!isEpisodeReleased(ep) || ep.number === null) return;
+      const key = episodeKey(ep.season, ep.number);
+      const wasWatched = watchedSet.has(key);
+
+      // Optimistic update
+      setWatchedSet((prev) => {
+        const next = new Set(prev);
+        if (wasWatched) { next.delete(key); } else { next.add(key); }
+        return next;
+      });
+      setWatchMutating((prev) => new Set(prev).add(key));
+
+      try {
+        if (wasWatched) {
+          await unmarkEpisodeWatched(show.id, ep.season, ep.number);
+        } else {
+          await markEpisodeWatched(show.id, ep.season, ep.number);
+        }
+      } catch {
+        // Rollback
+        setWatchedSet((prev) => {
+          const next = new Set(prev);
+          if (wasWatched) { next.add(key); } else { next.delete(key); }
+          return next;
+        });
+      } finally {
+        setWatchMutating((prev) => {
+          const n = new Set(prev);
+          n.delete(key);
+          return n;
+        });
+      }
+    },
+    [watchedSet, show.id]
+  );
+
+  // ── Season toggle ──
+  const toggleSeasonWatched = useCallback(
+    async (seasonNum: number, eps: TVMazeEpisode[]) => {
+      const releasedEps = eps.filter(
+        (e) => isEpisodeReleased(e) && e.number !== null
+      );
+      if (releasedEps.length === 0) return;
+
+      const seasonKeys = releasedEps.map((e) =>
+        episodeKey(e.season, e.number!)
+      );
+      const allWatched = seasonKeys.every((k) => watchedSet.has(k));
+
+      // Optimistic update
+      setWatchedSet((prev) => {
+        const next = new Set(prev);
+        if (allWatched) {
+          seasonKeys.forEach((k) => next.delete(k));
+        } else {
+          seasonKeys.forEach((k) => next.add(k));
+        }
+        return next;
+      });
+
+      try {
+        if (allWatched) {
+          await unmarkSeasonWatched(
+            show.id,
+            releasedEps.map((e) => ({ season: e.season, episode: e.number! }))
+          );
+        } else {
+          await markSeasonWatched(
+            show.id,
+            releasedEps.map((e) => ({ season: e.season, episode: e.number! }))
+          );
+        }
+      } catch {
+        // Reload on error
+        fetchWatchedEpisodes(show.id).then(setWatchedSet);
+      }
+    },
+    [watchedSet, show.id]
+  );
+
+  // ── Auto-complete detection ──
+  // When all released episodes are watched, auto-set status to "completed"
+  useEffect(() => {
+    if (
+      !isTracked ||
+      watchLoading ||
+      watchedSet.size === 0 ||
+      bulkMarkingRef.current
+    )
+      return;
+
+    const releasedEps = episodes.filter(
+      (e) => isEpisodeReleased(e) && e.number !== null
+    );
+    if (releasedEps.length === 0) return;
+
+    const allWatched = releasedEps.every((e) =>
+      watchedSet.has(episodeKey(e.season, e.number!))
+    );
+
+    // Only auto-complete upward — never downgrade
+    if (allWatched && trackingStatus !== "completed") {
+      handleStatusSelect("completed");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedSet, episodes, isTracked, watchLoading, trackingStatus]);
+
+  // ── Derived watch progress values ──
+  const releasedEpisodes = episodes.filter(
+    (e) => isEpisodeReleased(e) && e.number !== null
+  );
+  const totalReleased = releasedEpisodes.length;
+  const totalWatched = releasedEpisodes.filter((e) =>
+    watchedSet.has(episodeKey(e.season, e.number!))
+  ).length;
+  const progressPct =
+    totalReleased > 0 ? Math.round((totalWatched / totalReleased) * 100) : 0;
 
   return (
     <motion.div
@@ -435,6 +622,35 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
           )}
         </button>
 
+        {/* ── D3. Watch progress overview ────────────────────────────── */}
+        {isTracked && !watchLoading && totalReleased > 0 && (
+          <div className="bg-bg-surface border border-white/5 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-text-muted uppercase tracking-wider">
+                Progress
+              </span>
+              <span className="text-sm font-medium text-accent">
+                {totalWatched}/{totalReleased} episodes
+              </span>
+            </div>
+            <div className="h-2 bg-bg-raised rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-accent rounded-full"
+                initial={{ width: 0 }}
+                animate={{ width: `${progressPct}%` }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+              />
+            </div>
+            {/* "New episodes coming" tag */}
+            {nextEp && isNextEpisodeSoon(nextEp) && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-green-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                New episode {formatDate(nextEp.airdate)}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── E. Summary ───────────────────────────────────────────────── */}
         {displayedSummary && (
           <div>
@@ -494,6 +710,18 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
             <div className="flex flex-col gap-2">
               {Array.from(seasonMap.entries()).map(([seasonNum, eps]) => {
                 const isOpen = openSeasons.has(seasonNum);
+
+                // Per-season watch progress
+                const seasonReleased = eps.filter(
+                  (e) => isEpisodeReleased(e) && e.number !== null
+                );
+                const seasonWatchedCount = seasonReleased.filter((e) =>
+                  watchedSet.has(episodeKey(e.season, e.number!))
+                ).length;
+                const seasonAllWatched =
+                  seasonReleased.length > 0 &&
+                  seasonWatchedCount === seasonReleased.length;
+
                 return (
                   <div
                     key={seasonNum}
@@ -508,9 +736,52 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
                         Season {seasonNum}
                       </span>
                       <div className="flex items-center gap-2">
+                        {/* Watch progress counter */}
+                        {isTracked && !watchLoading && seasonReleased.length > 0 && (
+                          <span className="text-xs text-accent font-medium">
+                            {seasonWatchedCount}/{seasonReleased.length}
+                          </span>
+                        )}
                         <span className="text-xs text-text-muted">
                           {eps.length} eps
                         </span>
+                        {/* Season mark-all toggle */}
+                        {isTracked && !watchLoading && seasonReleased.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSeasonWatched(seasonNum, eps);
+                            }}
+                            className={`
+                              w-5 h-5 rounded-full border-2 flex items-center justify-center
+                              flex-shrink-0 transition-all duration-150
+                              ${seasonAllWatched
+                                ? "bg-accent border-accent"
+                                : "border-white/20 hover:border-white/40"
+                              }
+                            `}
+                            aria-label={
+                              seasonAllWatched
+                                ? `Unmark season ${seasonNum}`
+                                : `Mark season ${seasonNum} watched`
+                            }
+                          >
+                            {seasonAllWatched && (
+                              <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="white"
+                                strokeWidth="3"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </button>
+                        )}
                         <motion.svg
                           animate={{ rotate: isOpen ? 180 : 0 }}
                           transition={{ duration: 0.2 }}
@@ -529,6 +800,20 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
                       </div>
                     </button>
 
+                    {/* Season progress bar */}
+                    {isTracked && !watchLoading && seasonReleased.length > 0 && (
+                      <div className="h-0.5 bg-white/5">
+                        <motion.div
+                          className="h-full bg-accent"
+                          initial={{ width: 0 }}
+                          animate={{
+                            width: `${(seasonWatchedCount / seasonReleased.length) * 100}%`,
+                          }}
+                          transition={{ duration: 0.3, ease: "easeOut" }}
+                        />
+                      </div>
+                    )}
+
                     {/* Episode list */}
                     <AnimatePresence initial={false}>
                       {isOpen && (
@@ -541,33 +826,103 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
                           className="overflow-hidden"
                         >
                           <div className="divide-y divide-white/5">
-                            {eps.map((ep) => (
-                              <div
-                                key={ep.id}
-                                className="px-4 py-3 flex items-start justify-between gap-3"
-                              >
-                                <div className="flex flex-col gap-0.5 min-w-0">
-                                  <span className="text-xs font-mono text-accent">
-                                    {formatEpisodeCode(ep.season, ep.number)}
-                                  </span>
-                                  <p className="text-sm text-text-primary leading-snug line-clamp-2">
-                                    {ep.name}
-                                  </p>
-                                </div>
-                                <div className="flex-shrink-0 text-right">
-                                  {ep.airdate && (
-                                    <span className="text-xs text-text-muted whitespace-nowrap">
-                                      {formatDate(ep.airdate)}
+                            {eps.map((ep) => {
+                              const released = isEpisodeReleased(ep);
+                              const key =
+                                ep.number !== null
+                                  ? episodeKey(ep.season, ep.number)
+                                  : null;
+                              const watched = key ? watchedSet.has(key) : false;
+                              const isMutatingEp = key
+                                ? watchMutating.has(key)
+                                : false;
+
+                              return (
+                                <div
+                                  key={ep.id}
+                                  className={`px-4 py-3 flex items-start gap-3 ${
+                                    isTracked && watched
+                                      ? "opacity-60"
+                                      : ""
+                                  }`}
+                                >
+                                  {/* Watch toggle */}
+                                  {isTracked && !watchLoading && ep.number !== null && (
+                                    <button
+                                      onClick={() => toggleEpisode(ep)}
+                                      disabled={!released || isMutatingEp}
+                                      className={`
+                                        mt-0.5 w-6 h-6 rounded-full border-2
+                                        flex items-center justify-center flex-shrink-0
+                                        transition-all duration-150
+                                        ${watched
+                                          ? "bg-accent border-accent"
+                                          : "border-white/20 hover:border-white/40"
+                                        }
+                                        ${!released
+                                          ? "opacity-30 cursor-not-allowed"
+                                          : "cursor-pointer active:scale-90"
+                                        }
+                                      `}
+                                      aria-label={
+                                        watched
+                                          ? `Unmark ${formatEpisodeCode(ep.season, ep.number)}`
+                                          : `Mark ${formatEpisodeCode(ep.season, ep.number)} watched`
+                                      }
+                                    >
+                                      {isMutatingEp ? (
+                                        <motion.div
+                                          className="w-3 h-3 border-2 border-accent/40 border-t-accent rounded-full"
+                                          animate={{ rotate: 360 }}
+                                          transition={{
+                                            duration: 0.6,
+                                            repeat: Infinity,
+                                            ease: "linear",
+                                          }}
+                                        />
+                                      ) : watched ? (
+                                        <svg
+                                          width="12"
+                                          height="12"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="white"
+                                          strokeWidth="3"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        >
+                                          <polyline points="20 6 9 17 4 12" />
+                                        </svg>
+                                      ) : null}
+                                    </button>
+                                  )}
+
+                                  {/* Episode info */}
+                                  <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                                    <span className="text-xs font-mono text-accent">
+                                      {formatEpisodeCode(ep.season, ep.number)}
                                     </span>
-                                  )}
-                                  {ep.runtime && (
-                                    <p className="text-xs text-text-muted">
-                                      {ep.runtime}m
+                                    <p className="text-sm text-text-primary leading-snug line-clamp-2">
+                                      {ep.name}
                                     </p>
-                                  )}
+                                  </div>
+
+                                  {/* Date + runtime */}
+                                  <div className="flex-shrink-0 text-right">
+                                    {ep.airdate && (
+                                      <span className="text-xs text-text-muted whitespace-nowrap">
+                                        {formatDate(ep.airdate)}
+                                      </span>
+                                    )}
+                                    {ep.runtime && (
+                                      <p className="text-xs text-text-muted">
+                                        {ep.runtime}m
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </motion.div>
                       )}
