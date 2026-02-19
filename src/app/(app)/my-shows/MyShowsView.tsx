@@ -25,6 +25,15 @@ function filterShows(shows: EnrichedUserShow[], tab: TabId): EnrichedUserShow[] 
   return shows.filter((s) => s.status === tab);
 }
 
+/** Sections shown on the "All" tab — order matches the sort priority from page.tsx */
+const SECTIONS: { status: ShowStatus; label: string }[] = [
+  { status: "watching",      label: "Currently Watching" },
+  { status: "plan_to_watch", label: "Plan to Watch"      },
+  { status: "on_hold",       label: "On Hold"            },
+  { status: "completed",     label: "Completed"          },
+  { status: "dropped",       label: "Dropped"            },
+];
+
 const gridContainerVariants = {
   hidden: {},
   show: { transition: { staggerChildren: 0.04 } },
@@ -176,8 +185,47 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
               </div>
             )}
 
-            {/* Grid */}
-            {displayedShows.length > 0 && (
+            {/* Grouped sections on "All" tab */}
+            {displayedShows.length > 0 && activeTab === "all" && (
+              <div className="flex flex-col gap-8">
+                {SECTIONS.map(({ status, label }) => {
+                  const sectionShows = displayedShows.filter(
+                    (s) => s.status === status
+                  );
+                  if (sectionShows.length === 0) return null;
+                  return (
+                    <div key={status}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <h2 className="text-xs font-medium text-text-muted uppercase tracking-wider">
+                          {label}
+                        </h2>
+                        <span className="text-[10px] text-text-muted/60 font-medium">
+                          {sectionShows.length}
+                        </span>
+                      </div>
+                      <motion.div
+                        variants={gridContainerVariants}
+                        initial="hidden"
+                        animate="show"
+                        className="grid grid-cols-2 gap-3"
+                      >
+                        {sectionShows.map((userShow, index) => (
+                          <UserShowCard
+                            key={userShow.id}
+                            userShow={userShow}
+                            priority={index < 4}
+                            newSeasonComingSoon={userShow.newSeasonComingSoon}
+                          />
+                        ))}
+                      </motion.div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Flat grid on individual status tabs */}
+            {displayedShows.length > 0 && activeTab !== "all" && (
               <motion.div
                 variants={gridContainerVariants}
                 initial="hidden"
