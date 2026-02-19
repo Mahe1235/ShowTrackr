@@ -16,7 +16,7 @@ export default function PageWrapper({
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className={`min-h-screen px-4 ${className}`}
+      className={`min-h-screen px-4 pb-32 ${className}`}
     >
       {children}
     </motion.main>
