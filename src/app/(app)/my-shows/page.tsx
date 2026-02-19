@@ -7,12 +7,11 @@ import MyShowsView from "./MyShowsView";
 
 function getSortPriority(show: EnrichedUserShow): number {
   if (show.status === "watching") return 0;
-  if (show.status === "completed" && show.newSeasonComingSoon) return 1;
-  if (show.status === "plan_to_watch") return 2;
-  if (show.status === "on_hold") return 3;
-  if (show.status === "completed") return 4;
-  if (show.status === "dropped") return 5;
-  return 6;
+  if (show.status === "plan_to_watch") return 1;
+  if (show.status === "on_hold") return 2;
+  if (show.status === "completed") return 3;
+  if (show.status === "dropped") return 4;
+  return 5;
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
@@ -107,24 +106,42 @@ export default async function MyShowsPage() {
     };
   });
 
-  // ── Auto-move: completed shows with same-season upcoming episodes → watching ─
+  // ── Auto-move completed shows ──────────────────────────────────────────────
+  //  • Same-season upcoming episodes → "watching" (season isn't done yet)
+  //  • New season coming soon        → "plan_to_watch" (user can drop if uninterested)
 
-  const autoMoveIds: string[] = [];
+  const autoMoveToWatching: string[] = [];
+  const autoMoveToPlanToWatch: string[] = [];
+
   for (const show of enriched) {
-    if (show.status === "completed" && show.hasUpcomingEpisodesInCurrentSeason) {
+    if (show.status !== "completed") continue;
+
+    if (show.hasUpcomingEpisodesInCurrentSeason) {
       show.status = "watching";
-      autoMoveIds.push(show.id);
+      autoMoveToWatching.push(show.id);
+    } else if (show.newSeasonComingSoon) {
+      show.status = "plan_to_watch";
+      autoMoveToPlanToWatch.push(show.id);
     }
   }
 
-  // Fire-and-forget DB update — page renders immediately with corrected status
-  if (autoMoveIds.length > 0 && user) {
+  // Fire-and-forget DB updates — page renders immediately with corrected statuses
+  if (autoMoveToWatching.length > 0 && user) {
     supabase
       .from("user_shows")
       .update({ status: "watching" })
-      .in("id", autoMoveIds)
+      .in("id", autoMoveToWatching)
       .then(({ error }) => {
         if (error) console.error("Auto-move completed→watching failed:", error);
+      });
+  }
+  if (autoMoveToPlanToWatch.length > 0 && user) {
+    supabase
+      .from("user_shows")
+      .update({ status: "plan_to_watch" })
+      .in("id", autoMoveToPlanToWatch)
+      .then(({ error }) => {
+        if (error) console.error("Auto-move completed→plan_to_watch failed:", error);
       });
   }
 

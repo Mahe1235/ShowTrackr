@@ -207,7 +207,7 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
                         variants={gridContainerVariants}
                         initial="hidden"
                         animate="show"
-                        className="grid grid-cols-2 gap-3"
+                        className="grid grid-cols-3 gap-2.5"
                       >
                         {sectionShows.map((userShow, index) => (
                           <UserShowCard
@@ -230,7 +230,7 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
                 variants={gridContainerVariants}
                 initial="hidden"
                 animate="show"
-                className="grid grid-cols-2 gap-3"
+                className="grid grid-cols-3 gap-2.5"
               >
                 {displayedShows.map((userShow, index) => (
                   <UserShowCard

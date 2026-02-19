@@ -34,16 +34,16 @@ export default function UserShowCard({ userShow, priority = false, newSeasonComi
         variants={showCardVariants}
         whileTap={{ scale: 0.96 }}
         transition={{ type: "spring", stiffness: 400, damping: 25 }}
-        className="flex flex-col gap-2"
+        className="flex flex-col gap-1.5"
       >
         {/* Poster */}
-        <div className="aspect-[2/3] rounded-xl overflow-hidden bg-bg-raised relative">
+        <div className="aspect-[2/3] rounded-lg overflow-hidden bg-bg-raised relative">
           {show_poster ? (
             <Image
               src={show_poster}
               alt={show_name}
               fill
-              sizes="(max-width: 768px) 50vw, 200px"
+              sizes="(max-width: 768px) 33vw, 150px"
               className="object-cover"
               priority={priority}
             />
@@ -85,7 +85,7 @@ export default function UserShowCard({ userShow, priority = false, newSeasonComi
         </div>
 
         {/* Show name */}
-        <p className="text-text-primary text-sm font-medium leading-tight line-clamp-1 px-0.5">
+        <p className="text-text-primary text-xs font-medium leading-tight line-clamp-1 px-0.5">
           {show_name}
         </p>
       </motion.div>
