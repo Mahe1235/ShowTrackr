@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { searchShows } from "@/lib/tvmaze";
 import ShowCard from "@/components/ui/ShowCard";
@@ -106,11 +107,25 @@ function applyFiltersAndSort(
 }
 
 export default function SearchView({ popularShows }: SearchViewProps) {
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TVMazeShow[]>([]);
   const [status, setStatus] = useState<SearchStatus>("idle");
   const [activeGenre, setActiveGenre] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Infinite scroll
+  const [visibleCount, setVisibleCount] = useState(20);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // Pre-select genre from URL param (e.g. /search?genre=Drama)
+  useEffect(() => {
+    const genre = searchParams.get("genre");
+    if (genre) {
+      setActiveGenre(genre);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Filter / sort state
   const [sortOption, setSortOption]     = useState<SortOption>("popularity");
@@ -142,6 +157,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
 
   useEffect(() => {
     const trimmed = query.trim();
+
+    // Reset visible count whenever search term or genre changes
+    setVisibleCount(20);
 
     if (trimmed.length === 0 && activeGenre === null) {
       setStatus("idle");
@@ -180,6 +198,22 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       }
     };
   }, [query, activeGenre]);
+
+  // Infinite scroll — reveal 20 more popular shows when sentinel enters viewport
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + 20, displayShows.length));
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [displayShows.length]);
 
   function handleGenreClick(genre: string) {
     if (activeGenre === genre) {
@@ -515,11 +549,16 @@ export default function SearchView({ popularShows }: SearchViewProps) {
                   animate="show"
                   className="grid grid-cols-2 gap-3"
                 >
-                  {displayShows.map((show, index) => (
+                  {displayShows.slice(0, visibleCount).map((show, index) => (
                     <ShowCard key={show.id} show={show} priority={index < 4} />
                   ))}
                 </motion.div>
               </AnimatePresence>
+            )}
+
+            {/* Sentinel — IntersectionObserver watches this to load more */}
+            {visibleCount < displayShows.length && (
+              <div ref={sentinelRef} className="h-8 mt-2" />
             )}
           </>
         )}

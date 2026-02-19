@@ -256,7 +256,7 @@ export default function HomeView({ popularShows, userShows, isLoggedIn }: HomeVi
           {GENRES.map((genre) => (
             <Link
               key={genre}
-              href="/search"
+              href={`/search?genre=${encodeURIComponent(genre)}`}
               className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium border bg-bg-surface border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary transition-colors duration-150"
             >
               {genre}

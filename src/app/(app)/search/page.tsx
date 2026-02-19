@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import PageWrapper from "@/components/layout/PageWrapper";
 import SearchView from "./SearchView";
 import { getPopularShows } from "@/lib/tvmaze";
@@ -6,15 +7,18 @@ import type { TVMazeShow } from "@/types";
 export default async function SearchPage() {
   let popularShows: TVMazeShow[] = [];
   try {
-    const all = await getPopularShows();
-    popularShows = all.slice(0, 20);
+    // Pass all ~250 shows — SearchView handles virtual pagination via IntersectionObserver
+    popularShows = await getPopularShows();
   } catch {
     popularShows = [];
   }
 
   return (
     <PageWrapper>
-      <SearchView popularShows={popularShows} />
+      {/* Suspense required because SearchView uses useSearchParams() */}
+      <Suspense fallback={null}>
+        <SearchView popularShows={popularShows} />
+      </Suspense>
     </PageWrapper>
   );
 }
