@@ -56,10 +56,15 @@ function applyFiltersAndSort(
   let result = shows;
 
   // 1. Filter by status
+  // Shows with "Unknown" status (from TMDB list endpoints that don't include
+  // status data) are kept — we don't have enough info to exclude them.
   if (status !== "all") {
-    result = result.filter((s) =>
-      status === "running" ? s.status === "Running" : s.status !== "Running"
-    );
+    result = result.filter((s) => {
+      if (s.status === "Unknown") return true; // keep — status data unavailable
+      return status === "running"
+        ? s.status === "Running"
+        : s.status !== "Running";
+    });
   }
 
   // 2. Filter by minimum rating (nulls always excluded when threshold is set)
