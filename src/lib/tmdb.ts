@@ -337,19 +337,27 @@ export async function getPopularShows(): Promise<TVMazeShow[]> {
   return all.map((r) => mapListResult(r, genreMap));
 }
 
-/** Discover TV shows by genre (paginated, 20 per page) */
+/** Discover TV shows by genre (paginated, 20 per page) with optional server-side filters */
 export async function discoverShows(options: {
   genreId?: number;
   page?: number;
   sortBy?: string;
+  status?: "running" | "ended";
+  ratingMin?: number;
+  language?: string;       // ISO 639-1 code, e.g. "en"
 }): Promise<{ shows: TVMazeShow[]; totalPages: number }> {
-  const { genreId, page = 1, sortBy = "popularity.desc" } = options;
+  const { genreId, page = 1, sortBy = "popularity.desc", status, ratingMin, language } = options;
 
   const params = new URLSearchParams({
     sort_by: sortBy,
     page: String(page),
   });
   if (genreId) params.set("with_genres", String(genreId));
+  // TMDB with_status: 0=Returning Series, 3=Ended, 4=Cancelled
+  if (status === "running") params.set("with_status", "0");
+  if (status === "ended") params.set("with_status", "3|4");
+  if (ratingMin) params.set("vote_average.gte", String(ratingMin));
+  if (language) params.set("with_original_language", language);
 
   const [data, genreMap] = await Promise.all([
     tmdbFetch<{ results: TMDBListResultRaw[]; total_pages: number }>(

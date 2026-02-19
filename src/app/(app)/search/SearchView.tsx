@@ -143,19 +143,17 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const isTyping = query.trim().length > 0;
 
   // Determine which shows to display
+  // Genre discover: filters are applied server-side, so no client filter needed
+  // Popular/search: apply client-side filters
   const baseShows = isTyping
     ? searchResults
     : activeGenre
       ? genreShows
       : popularShows;
 
-  const displayShows = applyFiltersAndSort(
-    baseShows,
-    sortOption,
-    statusFilter,
-    ratingFilter,
-    langFilter
-  );
+  const displayShows = (activeGenre && !isTyping)
+    ? baseShows // Genre: already filtered server-side, just apply client sort for name sort
+    : applyFiltersAndSort(baseShows, sortOption, statusFilter, ratingFilter, langFilter);
 
   const activeFilterCount =
     (sortOption    !== "popularity" ? 1 : 0) +
@@ -165,16 +163,28 @@ export default function SearchView({ popularShows }: SearchViewProps) {
 
   const isFilteredEmpty =
     (status === "idle" || status === "success") &&
+    !genreLoading &&
     displayShows.length === 0 &&
-    baseShows.length > 0;
+    (activeGenre ? true : baseShows.length > 0);
+
+  // ── Build discover URL with filters ────────────────────────────────────────
+  function buildDiscoverUrl(genre: string, page: number): string {
+    const params = new URLSearchParams({
+      genre,
+      page: String(page),
+    });
+    if (sortOption !== "popularity") params.set("sort", sortOption);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (ratingFilter !== "any") params.set("rating", ratingFilter);
+    if (langFilter === "english") params.set("language", "en");
+    return `/api/discover?${params.toString()}`;
+  }
 
   // ── Fetch genre discover results from /api/discover ────────────────────────
-  const fetchGenre = useCallback(async (genre: string, page: number, append: boolean) => {
+  const fetchGenre = useCallback(async (url: string, append: boolean) => {
     setGenreLoading(true);
     try {
-      const res = await fetch(
-        `/api/discover?genre=${encodeURIComponent(genre)}&page=${page}`
-      );
+      const res = await fetch(url);
       if (!res.ok) throw new Error("Discover failed");
       const data: { shows: TVMazeShow[]; totalPages: number } = await res.json();
 
@@ -184,7 +194,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         setGenreShows(data.shows);
       }
       setGenreTotalPages(data.totalPages);
-      setGenrePage(page);
+      // Extract page from URL
+      const p = new URL(url, window.location.origin).searchParams.get("page");
+      setGenrePage(parseInt(p ?? "1", 10));
     } catch {
       if (!append) setGenreShows([]);
     } finally {
@@ -192,16 +204,17 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     }
   }, []);
 
-  // When genre changes, fetch page 1
+  // When genre or filters change, fetch page 1 with current filters
   useEffect(() => {
     if (activeGenre && !isTyping) {
       setGenreShows([]);
       setGenrePage(1);
       setGenreTotalPages(0);
       setStatus("idle");
-      fetchGenre(activeGenre, 1, false);
+      fetchGenre(buildDiscoverUrl(activeGenre, 1), false);
     }
-  }, [activeGenre, isTyping, fetchGenre]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGenre, isTyping, sortOption, statusFilter, ratingFilter, langFilter]);
 
   // ── Typed search query → /api/search ───────────────────────────────────────
   useEffect(() => {
@@ -253,7 +266,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         if (activeGenre && !isTyping) {
           // Server-side pagination: load next page from TMDB discover
           if (!genreLoading && genrePage < genreTotalPages) {
-            fetchGenre(activeGenre, genrePage + 1, true);
+            fetchGenre(buildDiscoverUrl(activeGenre, genrePage + 1), true);
           }
         } else {
           // Client-side virtual pagination for popular/search results
@@ -264,7 +277,8 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [activeGenre, isTyping, genreLoading, genrePage, genreTotalPages, fetchGenre]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGenre, isTyping, genreLoading, genrePage, genreTotalPages, sortOption, statusFilter, ratingFilter, langFilter]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
