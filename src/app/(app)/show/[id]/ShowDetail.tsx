@@ -211,10 +211,29 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
     }
     setWatchLoading(true);
     fetchWatchedEpisodes(show.id)
-      .then((set) => setWatchedSet(set))
+      .then(async (set) => {
+        // Backward compat: completed show with no watch_progress rows → backfill
+        if (trackingStatus === "completed" && set.size === 0) {
+          const released = episodes.filter(
+            (e) => isEpisodeReleased(e) && e.number !== null
+          );
+          if (released.length > 0) {
+            await markAllWatched(
+              show.id,
+              released.map((e) => ({ season: e.season, episode: e.number! }))
+            );
+            const allKeys = new Set(
+              released.map((e) => episodeKey(e.season, e.number!))
+            );
+            setWatchedSet(allKeys);
+            return;
+          }
+        }
+        setWatchedSet(set);
+      })
       .catch(() => setWatchedSet(new Set()))
       .finally(() => setWatchLoading(false));
-  }, [show.id, trackingStatus]);
+  }, [show.id, trackingStatus, episodes]);
 
   // ── Body scroll lock when sheet is open ──
   useEffect(() => {
@@ -260,11 +279,8 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
       );
       if (error) throw error;
 
-      // Bulk-mark all released episodes as watched when:
-      // 1. First time adding a show (prev was null) — any status
-      // 2. Explicitly marking "Completed" on an already-tracked show
-      const shouldBulkMark =
-        (prev === null) || (newStatus === "completed" && prev !== null);
+      // Bulk-mark all released episodes only when setting status to "completed"
+      const shouldBulkMark = newStatus === "completed";
 
       if (shouldBulkMark) {
         bulkMarkingRef.current = true;
