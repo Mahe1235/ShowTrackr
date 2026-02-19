@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import ShowCard from "@/components/ui/ShowCard";
@@ -114,6 +114,69 @@ function applyFiltersAndSort(
   });
 }
 
+// ── Fallback types & client-side diagnosis ──────────────────────────────────
+
+interface FallbackInfo {
+  shows: TVMazeShow[];
+  totalPages: number;
+  relaxedFilter: string;
+  relaxedFilterLabel: string;
+}
+
+/** When client-side filters yield 0 results, try relaxing each filter in
+ *  priority order (rating → status → language) and return the first that
+ *  produces results. Runs entirely on the already-loaded shows array — zero
+ *  API calls. */
+function diagnoseEmptyFilters(
+  shows: TVMazeShow[],
+  sort: SortOption,
+  statusF: StatusFilter,
+  ratingF: RatingFilter,
+  langF: LanguageFilter
+): FallbackInfo | null {
+  const candidates: Array<{
+    filter: string;
+    label: string;
+    apply: () => TVMazeShow[];
+  }> = [];
+
+  if (ratingF !== "any") {
+    candidates.push({
+      filter: "rating",
+      label: ratingF === "8" ? "8+ rating" : "7+ rating",
+      apply: () => applyFiltersAndSort(shows, sort, statusF, "any", langF),
+    });
+  }
+  if (statusF !== "all") {
+    candidates.push({
+      filter: "status",
+      label: statusF === "running" ? "Running status" : "Ended status",
+      apply: () => applyFiltersAndSort(shows, sort, "all", ratingF, langF),
+    });
+  }
+  if (langF !== "all") {
+    candidates.push({
+      filter: "lang",
+      label: "English only",
+      apply: () => applyFiltersAndSort(shows, sort, statusF, ratingF, "all"),
+    });
+  }
+
+  for (const c of candidates) {
+    const relaxed = c.apply();
+    if (relaxed.length > 0) {
+      return {
+        shows: relaxed,
+        totalPages: 1,
+        relaxedFilter: c.filter,
+        relaxedFilterLabel: c.label,
+      };
+    }
+  }
+
+  return null;
+}
+
 export default function SearchView({ popularShows }: SearchViewProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -165,6 +228,9 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const [genreTotalPages, setGenreTotalPages] = useState(0);
   const [genreLoading, setGenreLoading] = useState(false);
 
+  // Fallback state — set when server-side genre discover returns 0 results
+  const [serverFallback, setServerFallback] = useState<FallbackInfo | null>(null);
+
   // Popular shows infinite scroll (client-side virtual pagination)
   const [visibleCount, setVisibleCount] = useState(20);
 
@@ -191,6 +257,17 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     displayShows.length === 0 &&
     (activeGenre ? true : baseShows.length > 0);
 
+  // Client-side fallback: when popular/search filters yield 0 results,
+  // diagnose which filter to relax — runs on already-loaded data (no API calls)
+  const clientFallback = useMemo(() => {
+    if (!isFilteredEmpty || activeGenre || isTyping) return null;
+    if (activeFilterCount === 0) return null;
+    return diagnoseEmptyFilters(baseShows, sortOption, statusFilter, ratingFilter, langFilter);
+  }, [isFilteredEmpty, activeGenre, isTyping, activeFilterCount, baseShows, sortOption, statusFilter, ratingFilter, langFilter]);
+
+  // Unified fallback: server path uses serverFallback, client path uses clientFallback
+  const fallbackData = activeGenre ? serverFallback : clientFallback;
+
   // ── Build discover URL with filters ────────────────────────────────────────
   const buildDiscoverUrl = useCallback(
     (genre: string, page: number): string => {
@@ -210,10 +287,15 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   // ── Fetch genre discover results from /api/discover ────────────────────────
   const fetchGenre = useCallback(async (url: string, append: boolean) => {
     setGenreLoading(true);
+    setServerFallback(null);
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error("Discover failed");
-      const data: { shows: TVMazeShow[]; totalPages: number } = await res.json();
+      const data: {
+        shows: TVMazeShow[];
+        totalPages: number;
+        fallback?: FallbackInfo;
+      } = await res.json();
 
       if (append) {
         setGenreShows((prev) => [...prev, ...data.shows]);
@@ -221,6 +303,12 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         setGenreShows(data.shows);
       }
       setGenreTotalPages(data.totalPages);
+
+      // If primary query returned empty but API provided fallback results
+      if (data.shows.length === 0 && data.fallback) {
+        setServerFallback(data.fallback);
+      }
+
       // Extract page from URL
       const p = new URL(url, window.location.origin).searchParams.get("page");
       setGenrePage(parseInt(p ?? "1", 10));
@@ -657,18 +745,87 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         {(status === "idle" || status === "success") && !showGenreSkeletons && (
           <>
             {isFilteredEmpty ? (
-              <div className="py-16 flex flex-col items-center gap-2 text-center">
-                <p className="text-text-primary font-medium">No shows match your filters</p>
-                <p className="text-text-muted text-sm">
-                  Try adjusting or{" "}
-                  <button
-                    onClick={handleResetFilters}
-                    className="text-accent underline underline-offset-2"
-                  >
-                    clearing filters
-                  </button>
-                </p>
-              </div>
+              fallbackData ? (
+                /* ── Fallback: filters too restrictive, show relaxed results ── */
+                <>
+                  <div className="rounded-xl bg-bg-surface border border-accent/20 p-4 mb-4">
+                    <div className="flex items-start gap-3">
+                      {/* Info icon */}
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="text-accent flex-shrink-0 mt-0.5"
+                      >
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                      </svg>
+                      <div className="flex flex-col gap-2">
+                        <p className="text-text-primary text-sm font-medium">
+                          No shows match all your filters
+                        </p>
+                        <p className="text-text-secondary text-xs leading-relaxed">
+                          Showing results without the{" "}
+                          <span className="text-accent font-medium">
+                            {fallbackData.relaxedFilterLabel}
+                          </span>{" "}
+                          filter.
+                        </p>
+                        <div className="flex gap-2 mt-1">
+                          <button
+                            onClick={() =>
+                              setParams({ [fallbackData.relaxedFilter]: null })
+                            }
+                            className="px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-medium transition-colors hover:bg-accent/20"
+                          >
+                            Remove {fallbackData.relaxedFilterLabel}
+                          </button>
+                          <button
+                            onClick={handleResetFilters}
+                            className="px-3 py-1.5 rounded-lg bg-bg-raised border border-white/10 text-text-secondary text-xs font-medium transition-colors hover:text-text-primary"
+                          >
+                            Clear all filters
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key="fallback"
+                      variants={gridContainerVariants}
+                      initial="hidden"
+                      animate="show"
+                      className="grid grid-cols-2 gap-3"
+                    >
+                      {fallbackData.shows.slice(0, 20).map((show, index) => (
+                        <ShowCard key={show.id} show={show} priority={index < 4} />
+                      ))}
+                    </motion.div>
+                  </AnimatePresence>
+                </>
+              ) : (
+                /* ── True empty: even relaxed filters yield nothing ── */
+                <div className="py-16 flex flex-col items-center gap-2 text-center">
+                  <p className="text-text-primary font-medium">No shows match your filters</p>
+                  <p className="text-text-muted text-sm">
+                    Try adjusting or{" "}
+                    <button
+                      onClick={handleResetFilters}
+                      className="text-accent underline underline-offset-2"
+                    >
+                      clearing filters
+                    </button>
+                  </p>
+                </div>
+              )
             ) : (
               <AnimatePresence mode="wait">
                 <motion.div
