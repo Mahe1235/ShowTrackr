@@ -260,8 +260,13 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
       );
       if (error) throw error;
 
-      // When marking "Completed", bulk-mark all released episodes as watched
-      if (newStatus === "completed") {
+      // Bulk-mark all released episodes as watched when:
+      // 1. First time adding a show (prev was null) — any status
+      // 2. Explicitly marking "Completed" on an already-tracked show
+      const shouldBulkMark =
+        (prev === null) || (newStatus === "completed" && prev !== null);
+
+      if (shouldBulkMark) {
         bulkMarkingRef.current = true;
         const released = episodes.filter(
           (e) => isEpisodeReleased(e) && e.number !== null
@@ -622,28 +627,25 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
           )}
         </button>
 
-        {/* ── D3. Watch progress overview ────────────────────────────── */}
+        {/* ── D3. Watch progress (subtle inline) ──────────────────── */}
         {isTracked && !watchLoading && totalReleased > 0 && (
-          <div className="bg-bg-surface border border-white/5 rounded-xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-text-muted uppercase tracking-wider">
-                Progress
+          <div className="flex flex-col gap-2 -mt-2">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
+                <motion.div
+                  className="h-full bg-accent rounded-full"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${progressPct}%` }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                />
+              </div>
+              <span className="text-xs text-text-muted whitespace-nowrap">
+                {totalWatched}/{totalReleased} watched
               </span>
-              <span className="text-sm font-medium text-accent">
-                {totalWatched}/{totalReleased} episodes
-              </span>
-            </div>
-            <div className="h-2 bg-bg-raised rounded-full overflow-hidden">
-              <motion.div
-                className="h-full bg-accent rounded-full"
-                initial={{ width: 0 }}
-                animate={{ width: `${progressPct}%` }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
-              />
             </div>
             {/* "New episodes coming" tag */}
             {nextEp && isNextEpisodeSoon(nextEp) && (
-              <div className="mt-3 flex items-center gap-2 text-xs text-green-400">
+              <div className="flex items-center gap-2 text-xs text-green-400">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
                 New episode {formatDate(nextEp.airdate)}
               </div>
