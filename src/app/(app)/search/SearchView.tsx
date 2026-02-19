@@ -11,15 +11,15 @@ const GENRES = [
   "Drama",
   "Comedy",
   "Crime",
-  "Sci-Fi",
-  "Horror",
-  "Action",
-  "Thriller",
-  "Romance",
-  "Fantasy",
+  "Sci-Fi & Fantasy",
+  "Action & Adventure",
   "Mystery",
   "Animation",
-  "Adventure",
+  "Documentary",
+  "Reality",
+  "Kids",
+  "News",
+  "Talk",
 ] as const;
 
 const gridContainerVariants = {

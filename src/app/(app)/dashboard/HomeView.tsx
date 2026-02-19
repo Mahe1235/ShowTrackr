@@ -22,7 +22,7 @@ const STATUS_CONFIG: Record<ShowStatus, { label: string; color: string }> = {
   dropped:       { label: "Dropped",       color: "bg-red-500/15 text-red-400 border-red-500/20"          },
 };
 
-const GENRES = ["Drama", "Comedy", "Crime", "Sci-Fi", "Action", "Thriller", "Fantasy", "Animation"];
+const GENRES = ["Drama", "Comedy", "Crime", "Sci-Fi & Fantasy", "Action & Adventure", "Mystery", "Animation", "Documentary"];
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
