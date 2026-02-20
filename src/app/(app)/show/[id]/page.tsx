@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import ShowDetail from "./ShowDetail";
-import { getShowWithNextEpisode, getEpisodes } from "@/lib/tmdb";
+import { getShowWithNextEpisode, getEpisodes, getWatchProviders, type WatchProviders } from "@/lib/tmdb";
 import type { TVMazeShow, TVMazeEpisode } from "@/types";
 
 export default async function ShowDetailPage({
@@ -13,16 +13,18 @@ export default async function ShowDetailPage({
 
   let show: TVMazeShow;
   let episodes: TVMazeEpisode[];
+  let watchProviders: WatchProviders;
 
   try {
-    [show, episodes] = await Promise.all([
+    [show, episodes, watchProviders] = await Promise.all([
       getShowWithNextEpisode(id),
       getEpisodes(id),
+      getWatchProviders(id),
     ]);
   } catch {
     notFound();
     return null as never;
   }
 
-  return <ShowDetail show={show!} episodes={episodes!} />;
+  return <ShowDetail show={show!} episodes={episodes!} watchProviders={watchProviders!} />;
 }

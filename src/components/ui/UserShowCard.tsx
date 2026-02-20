@@ -22,11 +22,17 @@ interface UserShowCardProps {
   userShow: UserShow;
   priority?: boolean;
   newSeasonTag?: "soon" | "out" | null;
+  isRunning?: boolean;
 }
 
-export default function UserShowCard({ userShow, priority = false, newSeasonTag = null }: UserShowCardProps) {
+export default function UserShowCard({ userShow, priority = false, newSeasonTag = null, isRunning = false }: UserShowCardProps) {
   const { show_name, show_poster, tvmaze_show_id, status } = userShow;
-  const badge = STATUS_CONFIG[status];
+
+  // Running shows marked "completed" display as "Caught Up"
+  const isCaughtUp = status === "completed" && isRunning;
+  const badge = isCaughtUp
+    ? { label: "Caught Up", color: "bg-sky-500/15 text-sky-400 border-sky-500/20" }
+    : STATUS_CONFIG[status];
 
   return (
     <Link href={`/show/${tvmaze_show_id}`} className="block">

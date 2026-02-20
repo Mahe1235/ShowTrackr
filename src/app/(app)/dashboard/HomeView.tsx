@@ -110,8 +110,11 @@ function TrendingCard({ show, priority = false }: { show: TVMazeShow; priority?:
 
 /** Compact horizontal-rail card for a user's tracked show */
 function UserRailCard({ userShow, priority = false }: { userShow: EnrichedUserShow; priority?: boolean }) {
-  const { show_name, show_poster, tvmaze_show_id, status, newSeasonTag } = userShow;
-  const badge = STATUS_CONFIG[status];
+  const { show_name, show_poster, tvmaze_show_id, status, newSeasonTag, isRunning } = userShow;
+  const isCaughtUp = status === "completed" && isRunning;
+  const badge = isCaughtUp
+    ? { label: "Caught Up", color: "bg-sky-500/15 text-sky-400 border-sky-500/20" }
+    : STATUS_CONFIG[status];
   return (
     <Link href={`/show/${tvmaze_show_id}`} className="block w-[110px] flex-shrink-0">
       <motion.div

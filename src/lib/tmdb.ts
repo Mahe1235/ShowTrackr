@@ -373,6 +373,8 @@ export interface ShowSeasonMeta {
   numberOfSeasons: number;
   /** Air date of the latest (highest-numbered, non-specials) season premiere */
   latestSeasonAirDate: string | null;
+  /** Whether the show is still airing ("Running") or has ended */
+  isRunning: boolean;
 }
 
 /** Lightweight metadata fetch — returns season-level info for enrichment logic */
@@ -410,9 +412,82 @@ export async function getShowSeasonMeta(id: number): Promise<ShowSeasonMeta | nu
         : null,
       numberOfSeasons: raw.number_of_seasons,
       latestSeasonAirDate,
+      isRunning: raw.status === "Returning Series",
     };
   } catch {
     return null;
+  }
+}
+
+// ── Watch providers ──────────────────────────────────────────────────────────
+
+export interface WatchProvider {
+  id: number;
+  name: string;
+  logoPath: string | null;
+}
+
+export interface WatchProviders {
+  /** Streaming / subscription services (e.g. Netflix, Hulu) */
+  flatrate: WatchProvider[];
+  /** Purchase providers (e.g. Apple TV, Google Play) */
+  buy: WatchProvider[];
+  /** Rental providers */
+  rent: WatchProvider[];
+  /** TMDB "Where to Watch" link */
+  link: string | null;
+}
+
+interface TMDBProviderRaw {
+  provider_id: number;
+  provider_name: string;
+  logo_path: string | null;
+}
+
+interface TMDBWatchProvidersRaw {
+  results: Record<
+    string,
+    {
+      link?: string;
+      flatrate?: TMDBProviderRaw[];
+      buy?: TMDBProviderRaw[];
+      rent?: TMDBProviderRaw[];
+    }
+  >;
+}
+
+function mapProvider(raw: TMDBProviderRaw): WatchProvider {
+  return {
+    id: raw.provider_id,
+    name: raw.provider_name,
+    logoPath: tmdbImage(raw.logo_path, "w92"),
+  };
+}
+
+/**
+ * Fetch watch/streaming providers for a TV show.
+ * Returns data for the given region (default "US").
+ */
+export async function getWatchProviders(
+  showId: number,
+  region = "US"
+): Promise<WatchProviders> {
+  try {
+    const data = await tmdbFetch<TMDBWatchProvidersRaw>(
+      `/tv/${showId}/watch/providers`
+    );
+    const regionData = data.results?.[region];
+    if (!regionData) {
+      return { flatrate: [], buy: [], rent: [], link: null };
+    }
+    return {
+      flatrate: (regionData.flatrate ?? []).map(mapProvider),
+      buy: (regionData.buy ?? []).map(mapProvider),
+      rent: (regionData.rent ?? []).map(mapProvider),
+      link: regionData.link ?? null,
+    };
+  } catch {
+    return { flatrate: [], buy: [], rent: [], link: null };
   }
 }
 

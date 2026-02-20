@@ -123,6 +123,8 @@ export interface EnrichedUserShow extends UserShow {
   nextEpisodeAirDate: string | null;
   /** True if the show has unreleased episodes in the same season as the last aired */
   hasUpcomingEpisodesInCurrentSeason: boolean;
+  /** Whether the show is still airing new episodes */
+  isRunning: boolean;
 }
 
 export interface WatchProgress {

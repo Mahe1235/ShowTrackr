@@ -15,6 +15,7 @@ import {
   episodeKey,
 } from "@/lib/watch-progress";
 import type { TVMazeShow, TVMazeEpisode, ShowStatus } from "@/types";
+import type { WatchProviders } from "@/lib/tmdb";
 
 // ── Pure utility functions ──────────────────────────────────────────────────
 
@@ -73,13 +74,17 @@ function isNextEpisodeSoon(ep: TVMazeEpisode): boolean {
 
 // ── Tracking constants (outside component — stable across renders) ──────────
 
-const STATUS_DISPLAY: Record<ShowStatus, string> = {
-  watching:      "Watching",
-  plan_to_watch: "Plan to Watch",
-  completed:     "Completed",
-  on_hold:       "On Hold",
-  dropped:       "Dropped",
-};
+function getStatusDisplay(status: ShowStatus, isShowRunning: boolean): string {
+  if (status === "completed" && isShowRunning) return "Caught Up";
+  const map: Record<ShowStatus, string> = {
+    watching:      "Watching",
+    plan_to_watch: "Plan to Watch",
+    completed:     "Completed",
+    on_hold:       "On Hold",
+    dropped:       "Dropped",
+  };
+  return map[status];
+}
 
 const STATUS_OPTIONS: Array<{ status: ShowStatus; label: string; icon: React.ReactElement }> = [
   {
@@ -139,11 +144,12 @@ const STATUS_OPTIONS: Array<{ status: ShowStatus; label: string; icon: React.Rea
 interface ShowDetailProps {
   show: TVMazeShow;
   episodes: TVMazeEpisode[];
+  watchProviders: WatchProviders;
 }
 
 const SUMMARY_CUTOFF = 200;
 
-export default function ShowDetail({ show, episodes }: ShowDetailProps) {
+export default function ShowDetail({ show, episodes, watchProviders }: ShowDetailProps) {
   const router = useRouter();
 
   // ── Existing state ──
@@ -173,6 +179,7 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
   const plainSummary = show.summary ? stripHtml(show.summary) : null;
   const nextEp = show._embedded?.nextepisode ?? null;
   const seasonMap = groupBySeason(episodes);
+  const isShowRunning = show.status === "Running";
 
   const isTruncatable = plainSummary !== null && plainSummary.length > SUMMARY_CUTOFF;
   const displayedSummary =
@@ -633,7 +640,7 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
           {!isTrackingLoaded || isMutating
             ? "Loading…"
             : isTracked
-            ? STATUS_DISPLAY[trackingStatus!]
+            ? getStatusDisplay(trackingStatus!, isShowRunning)
             : "Add to My Shows"
           }
 
@@ -688,6 +695,124 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
                 {summaryExpanded ? "Show less" : "Read more"}
               </button>
             )}
+          </div>
+        )}
+
+        {/* ── E2. Where to Watch ───────────────────────────────────────── */}
+        {(watchProviders.flatrate.length > 0 || watchProviders.buy.length > 0 || watchProviders.rent.length > 0) && (
+          <div>
+            <h2 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
+              Where to Watch
+            </h2>
+
+            {/* Streaming (flatrate) */}
+            {watchProviders.flatrate.length > 0 && (
+              <div className="mb-3">
+                <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2">Stream</p>
+                <div className="flex flex-wrap gap-2">
+                  {watchProviders.flatrate.map((p) => (
+                    <a
+                      key={p.id}
+                      href={watchProviders.link ?? undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-surface border border-white/5 hover:border-white/15 transition-colors duration-150"
+                      title={p.name}
+                    >
+                      {p.logoPath ? (
+                        <Image
+                          src={p.logoPath}
+                          alt={p.name}
+                          width={24}
+                          height={24}
+                          className="rounded-md flex-shrink-0"
+                        />
+                      ) : null}
+                      <span className="text-xs text-text-secondary font-medium">
+                        {p.name}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Buy */}
+            {watchProviders.buy.length > 0 && (
+              <div className="mb-3">
+                <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2">Buy</p>
+                <div className="flex flex-wrap gap-2">
+                  {watchProviders.buy.map((p) => (
+                    <a
+                      key={p.id}
+                      href={watchProviders.link ?? undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-surface border border-white/5 hover:border-white/15 transition-colors duration-150"
+                      title={p.name}
+                    >
+                      {p.logoPath ? (
+                        <Image
+                          src={p.logoPath}
+                          alt={p.name}
+                          width={24}
+                          height={24}
+                          className="rounded-md flex-shrink-0"
+                        />
+                      ) : null}
+                      <span className="text-xs text-text-secondary font-medium">
+                        {p.name}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Rent */}
+            {watchProviders.rent.length > 0 && (
+              <div>
+                <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2">Rent</p>
+                <div className="flex flex-wrap gap-2">
+                  {watchProviders.rent.map((p) => (
+                    <a
+                      key={p.id}
+                      href={watchProviders.link ?? undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-surface border border-white/5 hover:border-white/15 transition-colors duration-150"
+                      title={p.name}
+                    >
+                      {p.logoPath ? (
+                        <Image
+                          src={p.logoPath}
+                          alt={p.name}
+                          width={24}
+                          height={24}
+                          className="rounded-md flex-shrink-0"
+                        />
+                      ) : null}
+                      <span className="text-xs text-text-secondary font-medium">
+                        {p.name}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* JustWatch attribution */}
+            <p className="text-[10px] text-text-muted mt-3">
+              Streaming data provided by{" "}
+              <a
+                href={watchProviders.link ?? undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent"
+              >
+                JustWatch
+              </a>
+            </p>
           </div>
         )}
 
@@ -995,6 +1120,7 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
               <div className="flex flex-col gap-2">
                 {STATUS_OPTIONS.map(({ status, label, icon }) => {
                   const isSelected = trackingStatus === status;
+                  const displayLabel = status === "completed" && isShowRunning ? "Caught Up" : label;
                   return (
                     <button
                       key={status}
@@ -1009,7 +1135,7 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
                       `}
                     >
                       <span className="flex-shrink-0">{icon}</span>
-                      <span className="text-sm font-medium">{label}</span>
+                      <span className="text-sm font-medium">{displayLabel}</span>
                       {isSelected && (
                         <svg className="ml-auto flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />

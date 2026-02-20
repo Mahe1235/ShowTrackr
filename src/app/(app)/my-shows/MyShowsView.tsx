@@ -215,6 +215,7 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
                             userShow={userShow}
                             priority={index < 4}
                             newSeasonTag={userShow.newSeasonTag}
+                            isRunning={userShow.isRunning}
                           />
                         ))}
                       </motion.div>
@@ -238,6 +239,7 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
                     userShow={userShow}
                     priority={index < 4}
                     newSeasonTag={userShow.newSeasonTag}
+                    isRunning={userShow.isRunning}
                   />
                 ))}
               </motion.div>

@@ -136,6 +136,7 @@ export async function enrichUserShows(
       newSeasonTag,
       nextEpisodeAirDate,
       hasUpcomingEpisodesInCurrentSeason,
+      isRunning: meta?.isRunning ?? false,
     };
   });
 
