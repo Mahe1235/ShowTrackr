@@ -1,38 +1,54 @@
 "use client";
 
-import Image from "next/image";
 import { motion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 
 // ── Poster collage data ───────────────────────────────────────────────────────
-// Hardcoded TMDB poster paths — mix of eras, genres, and cultures.
+// TMDB poster paths verified against known show IDs.
+// Using w342 size — good quality, fast load.
 const ALL_POSTERS = [
-  "/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",  // Breaking Bad
-  "/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", // Game of Thrones
-  "/rTc7ZXdroqjkKivFPvCPX0Ru7OU.jpg", // The Sopranos
-  "/f496cm9enuEsZkSPzCwnTESEK5s.jpg", // Friends
-  "/4lbclFySvugI51fwsyxBTOm4DqK.jpg", // The Wire
-  "/49WJfeN0moxb9IPfGn8AIqMGskD.jpg", // Stranger Things
-  "/hlLXt2tOPT6RRnjiUmoxyG1LTFi.jpg", // Chernobyl
-  "/1M876KPjulVwppEpldhdc8V4o68.jpg", // The Crown
-  "/apbrbWs5M9kQC35D5KBjSMFmhpP.jpg", // Dark
-  "/e2X8g1fFk6xM1dETObOLKgScFzZ.jpg", // Succession
-  "/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg", // The Last of Us
-  "/z2yahl2uefxDCl0nogcRBstwruJ.jpg", // House of the Dragon
-  "/vUUqzWa2LnHIVqkaKVlVGkVcZIW.jpg", // Peaky Blinders
-  "/pCGyPVrI9Fzw6rE1Pvi4BIXF6ET.jpg", // Ozark
-  "/ea1HoLMHytfBFMqSWbVBjKpjuPZ.jpg", // Better Call Saul
-  "/lgkgmus0zf9J8RL9JFm4zmALMb2.jpg", // Severance
-  "/sHFlbKS3WLqMnp9t2ghADIJFnuQ.jpg", // The Bear
-  "/dDlEmu3EZ0Pgg93K2SVNLCjCSvE.jpg", // Squid Game
+  // Breaking Bad (1396)
+  "https://image.tmdb.org/t/p/w342/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
+  // Game of Thrones (1399)
+  "https://image.tmdb.org/t/p/w342/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg",
+  // The Sopranos (1398)
+  "https://image.tmdb.org/t/p/w342/rTc7ZXdroqjkKivFPvCPX0Ru7OU.jpg",
+  // Friends (1668)
+  "https://image.tmdb.org/t/p/w342/f496cm9enuEsZkSPzCwnTESEK5s.jpg",
+  // Stranger Things (66732)
+  "https://image.tmdb.org/t/p/w342/49WJfeN0moxb9IPfGn8AIqMGskD.jpg",
+  // The Wire (1438)
+  "https://image.tmdb.org/t/p/w342/4lbclFySvugI51fwsyxBTOm4DqK.jpg",
+  // Chernobyl (87108)
+  "https://image.tmdb.org/t/p/w342/hlLXt2tOPT6RRnjiUmoxyG1LTFi.jpg",
+  // The Crown (65494)
+  "https://image.tmdb.org/t/p/w342/1M876KPjulVwppEpldhdc8V4o68.jpg",
+  // Dark (70523)
+  "https://image.tmdb.org/t/p/w342/apbrbWs5M9kQC35D5KBjSMFmhpP.jpg",
+  // Succession (63351)
+  "https://image.tmdb.org/t/p/w342/e2X8g1fFk6xM1dETObOLKgScFzZ.jpg",
+  // The Last of Us (100088)
+  "https://image.tmdb.org/t/p/w342/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg",
+  // House of the Dragon (94997)
+  "https://image.tmdb.org/t/p/w342/z2yahl2uefxDCl0nogcRBstwruJ.jpg",
+  // Peaky Blinders (60574)
+  "https://image.tmdb.org/t/p/w342/vUUqzWa2LnHIVqkaKVlVGkVcZIW.jpg",
+  // Ozark (69740)
+  "https://image.tmdb.org/t/p/w342/pCGyPVrI9Fzw6rE1Pvi4BIXF6ET.jpg",
+  // Better Call Saul (60059)
+  "https://image.tmdb.org/t/p/w342/ea1HoLMHytfBFMqSWbVBjKpjuPZ.jpg",
+  // Severance (95396)
+  "https://image.tmdb.org/t/p/w342/lgkgmus0zf9J8RL9JFm4zmALMb2.jpg",
+  // The Bear (136315)
+  "https://image.tmdb.org/t/p/w342/sHFlbKS3WLqMnp9t2ghADIJFnuQ.jpg",
+  // Squid Game (93405)
+  "https://image.tmdb.org/t/p/w342/dDlEmu3EZ0Pgg93K2SVNLCjCSvE.jpg",
 ];
 
 // Split into 3 columns of 6 each
 const COL1 = ALL_POSTERS.slice(0, 6);
 const COL2 = ALL_POSTERS.slice(6, 12);
 const COL3 = ALL_POSTERS.slice(12, 18);
-
-const TMDB_IMG = "https://image.tmdb.org/t/p/w342";
 
 // ── PosterColumn ─────────────────────────────────────────────────────────────
 
@@ -45,7 +61,6 @@ function PosterColumn({
   direction: "up" | "down";
   duration: number;
 }) {
-  // Duplicate to make the loop seamless
   const doubled = [...posters, ...posters];
   const yStart = direction === "up" ? "0%" : "-50%";
   const yEnd   = direction === "up" ? "-50%" : "0%";
@@ -62,17 +77,15 @@ function PosterColumn({
         }}
         className="flex flex-col"
       >
-        {doubled.map((path, i) => (
-          <div key={i} className="relative w-full aspect-[2/3] flex-shrink-0">
-            <Image
-              src={`${TMDB_IMG}${path}`}
-              alt=""
-              fill
-              sizes="33vw"
-              className="object-cover"
-              priority={i < 3}
-            />
-          </div>
+        {doubled.map((src, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={i}
+            src={src}
+            alt=""
+            className="w-full aspect-[2/3] object-cover flex-shrink-0"
+            loading={i < 4 ? "eager" : "lazy"}
+          />
         ))}
       </motion.div>
     </div>
@@ -93,7 +106,7 @@ export default function SignInPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black">
+    <div className="fixed inset-0 overflow-hidden bg-black">
 
       {/* ── Poster collage background ── */}
       <div className="absolute inset-0 flex">
@@ -103,10 +116,10 @@ export default function SignInPage() {
       </div>
 
       {/* ── Dark gradient overlay ── */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/30 to-black/90" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/20 to-black/90" />
 
       {/* ── Foreground content — bottom anchored ── */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-end pb-16 px-6">
+      <div className="absolute inset-0 flex flex-col items-center justify-end pb-16 px-6">
 
         {/* Logo */}
         <motion.div
