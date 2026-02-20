@@ -84,7 +84,7 @@ function PosterColumn({
             src={src}
             alt=""
             className="w-full aspect-[2/3] object-cover flex-shrink-0"
-            loading={i < 4 ? "eager" : "lazy"}
+            loading="eager"
             referrerPolicy="no-referrer"
           />
         ))}
