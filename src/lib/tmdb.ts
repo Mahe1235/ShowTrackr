@@ -470,7 +470,7 @@ function mapProvider(raw: TMDBProviderRaw): WatchProvider {
  */
 export async function getWatchProviders(
   showId: number,
-  region = "US"
+  region = "IN"
 ): Promise<WatchProviders> {
   try {
     const data = await tmdbFetch<TMDBWatchProvidersRaw>(

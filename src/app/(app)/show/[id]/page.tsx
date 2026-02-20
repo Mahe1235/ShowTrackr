@@ -19,7 +19,7 @@ export default async function ShowDetailPage({
     [show, episodes, watchProviders] = await Promise.all([
       getShowWithNextEpisode(id),
       getEpisodes(id),
-      getWatchProviders(id),
+      getWatchProviders(id, "IN"),
     ]);
   } catch {
     notFound();
