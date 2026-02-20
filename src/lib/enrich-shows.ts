@@ -54,6 +54,8 @@ export async function enrichUserShows(
   // ── Enrich shows ────────────────────────────────────────────────────────
 
   const now = new Date();
+  const threeMonthsAgo = new Date(now);
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
   const threeMonthsLater = new Date(now);
   threeMonthsLater.setMonth(threeMonthsLater.getMonth() + 3);
 
@@ -64,19 +66,15 @@ export async function enrichUserShows(
     let hasUpcomingEpisodesInCurrentSeason = false;
 
     if (meta) {
-      const { nextEpisode, lastEpisode } = meta;
+      const { nextEpisode, lastEpisode, latestSeasonAirDate, numberOfSeasons } = meta;
 
       if (nextEpisode?.airDate) {
         nextEpisodeAirDate = nextEpisode.airDate;
         const airDate = new Date(nextEpisode.airDate + "T00:00:00");
 
-        // New season detection: next episode is in a HIGHER season
+        // "New Season Soon": next episode is in a HIGHER season and airs within 3 months
         if (lastEpisode && nextEpisode.seasonNumber > lastEpisode.seasonNumber) {
-          if (airDate <= now) {
-            // New season already started airing
-            newSeasonTag = "out";
-          } else if (airDate <= threeMonthsLater) {
-            // New season coming within 3 months
+          if (airDate > now && airDate <= threeMonthsLater) {
             newSeasonTag = "soon";
           }
         }
@@ -88,6 +86,21 @@ export async function enrichUserShows(
           airDate > now
         ) {
           hasUpcomingEpisodesInCurrentSeason = true;
+        }
+      }
+
+      // "New Season Out": the show's latest season premiered within the last 3 months.
+      // This uses the actual season air_date from TMDB's seasons array, so it only
+      // triggers for genuinely recently released seasons — not old shows the user
+      // is simply behind on.
+      if (
+        newSeasonTag === null &&
+        latestSeasonAirDate &&
+        numberOfSeasons > 1
+      ) {
+        const premiereDate = new Date(latestSeasonAirDate + "T00:00:00");
+        if (premiereDate >= threeMonthsAgo && premiereDate <= now) {
+          newSeasonTag = "out";
         }
       }
     }
@@ -145,6 +158,22 @@ export async function enrichUserShows(
     const pa = getSortPriority(a);
     const pb = getSortPriority(b);
     if (pa !== pb) return pa - pb;
+
+    // Within the same status: sort by most recent episode air date (newest first).
+    // Uses lastEpisode.airDate (most recently aired episode), falls back to
+    // latestSeasonAirDate, then created_at.
+    const aMeta = metaMap.get(a.tvmaze_show_id);
+    const bMeta = metaMap.get(b.tvmaze_show_id);
+    const aDate = aMeta?.lastEpisode?.airDate ?? aMeta?.latestSeasonAirDate ?? null;
+    const bDate = bMeta?.lastEpisode?.airDate ?? bMeta?.latestSeasonAirDate ?? null;
+
+    if (aDate && bDate) {
+      return new Date(bDate).getTime() - new Date(aDate).getTime();
+    }
+    // Shows with air dates sort before shows without
+    if (aDate && !bDate) return -1;
+    if (!aDate && bDate) return 1;
+
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 

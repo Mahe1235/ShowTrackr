@@ -148,9 +148,11 @@ export default function ShowDetail({ show, episodes }: ShowDetailProps) {
 
   // ── Existing state ──
   const [summaryExpanded, setSummaryExpanded] = useState(false);
-  const [openSeasons, setOpenSeasons] = useState<Set<number>>(
-    () => new Set([1])
-  );
+  const [openSeasons, setOpenSeasons] = useState<Set<number>>(() => {
+    // Default to the latest (highest-numbered) season expanded
+    const maxSeason = episodes.reduce((max, ep) => Math.max(max, ep.season), 0);
+    return new Set([maxSeason || 1]);
+  });
 
   // ── Tracking state ──
   // undefined = initial loading, null = not tracked, ShowStatus = tracked

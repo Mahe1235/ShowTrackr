@@ -41,6 +41,14 @@ interface TMDBEpisodeRaw {
   overview: string | null;
 }
 
+interface TMDBSeasonSummaryRaw {
+  id: number;
+  season_number: number;
+  air_date: string | null;
+  episode_count: number;
+  name: string;
+}
+
 interface TMDBShowRaw {
   id: number;
   name: string;
@@ -61,6 +69,7 @@ interface TMDBShowRaw {
   number_of_episodes: number;
   next_episode_to_air: TMDBEpisodeRaw | null;
   last_episode_to_air: TMDBEpisodeRaw | null;
+  seasons: TMDBSeasonSummaryRaw[];
 }
 
 interface TMDBSeasonRaw {
@@ -362,12 +371,27 @@ export interface ShowSeasonMeta {
     airDate: string | null;
   } | null;
   numberOfSeasons: number;
+  /** Air date of the latest (highest-numbered, non-specials) season premiere */
+  latestSeasonAirDate: string | null;
 }
 
 /** Lightweight metadata fetch — returns season-level info for enrichment logic */
 export async function getShowSeasonMeta(id: number): Promise<ShowSeasonMeta | null> {
   try {
     const raw = await tmdbFetch<TMDBShowRaw>(`/tv/${id}`);
+
+    // Find the latest non-specials season's air_date from the seasons array
+    let latestSeasonAirDate: string | null = null;
+    if (raw.seasons && raw.seasons.length > 0) {
+      // Filter out specials (season 0), sort descending by season_number
+      const regularSeasons = raw.seasons
+        .filter((s) => s.season_number > 0 && s.air_date)
+        .sort((a, b) => b.season_number - a.season_number);
+      if (regularSeasons.length > 0) {
+        latestSeasonAirDate = regularSeasons[0].air_date;
+      }
+    }
+
     return {
       tmdbId: raw.id,
       nextEpisode: raw.next_episode_to_air
@@ -385,6 +409,7 @@ export async function getShowSeasonMeta(id: number): Promise<ShowSeasonMeta | nu
           }
         : null,
       numberOfSeasons: raw.number_of_seasons,
+      latestSeasonAirDate,
     };
   } catch {
     return null;
