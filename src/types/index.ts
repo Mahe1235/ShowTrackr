@@ -117,8 +117,8 @@ export interface UserShow {
 }
 
 export interface EnrichedUserShow extends UserShow {
-  /** True if next episode is in a new season and airs within 3 months */
-  newSeasonComingSoon: boolean;
+  /** "soon" if new season within 3 months, "out" if already airing, null otherwise */
+  newSeasonTag: "soon" | "out" | null;
   /** ISO date of the next episode air date, if any */
   nextEpisodeAirDate: string | null;
   /** True if the show has unreleased episodes in the same season as the last aired */

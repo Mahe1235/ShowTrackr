@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import type { TVMazeShow, UserShow, ShowStatus } from "@/types";
+import type { TVMazeShow, EnrichedUserShow, ShowStatus } from "@/types";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -109,8 +109,8 @@ function TrendingCard({ show, priority = false }: { show: TVMazeShow; priority?:
 }
 
 /** Compact horizontal-rail card for a user's tracked show */
-function UserRailCard({ userShow, priority = false }: { userShow: UserShow; priority?: boolean }) {
-  const { show_name, show_poster, tvmaze_show_id, status } = userShow;
+function UserRailCard({ userShow, priority = false }: { userShow: EnrichedUserShow; priority?: boolean }) {
+  const { show_name, show_poster, tvmaze_show_id, status, newSeasonTag } = userShow;
   const badge = STATUS_CONFIG[status];
   return (
     <Link href={`/show/${tvmaze_show_id}`} className="block w-[110px] flex-shrink-0">
@@ -134,6 +134,23 @@ function UserRailCard({ userShow, priority = false }: { userShow: UserShow; prio
               <span className="text-text-muted text-[10px] text-center leading-relaxed line-clamp-3">
                 {show_name}
               </span>
+            </div>
+          )}
+          {/* New season tag — top-left */}
+          {newSeasonTag && (
+            <div
+              className={`
+                absolute top-1.5 left-1.5
+                px-1.5 py-0.5 rounded-full
+                text-[8px] font-semibold
+                backdrop-blur-sm
+                ${newSeasonTag === "out"
+                  ? "bg-green-500/90 text-black"
+                  : "bg-amber-500/90 text-black"
+                }
+              `}
+            >
+              {newSeasonTag === "out" ? "New Season Out" : "New Season Soon"}
             </div>
           )}
           {/* Status badge */}
@@ -186,7 +203,7 @@ function SectionHeader({
 interface HomeViewProps {
   popularShows: TVMazeShow[];
   topRatedShows: TVMazeShow[];
-  userShows: UserShow[];
+  userShows: EnrichedUserShow[];
   isLoggedIn: boolean;
 }
 

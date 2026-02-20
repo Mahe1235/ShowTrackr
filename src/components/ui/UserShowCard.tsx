@@ -21,10 +21,10 @@ const STATUS_CONFIG: Record<ShowStatus, { label: string; color: string }> = {
 interface UserShowCardProps {
   userShow: UserShow;
   priority?: boolean;
-  newSeasonComingSoon?: boolean;
+  newSeasonTag?: "soon" | "out" | null;
 }
 
-export default function UserShowCard({ userShow, priority = false, newSeasonComingSoon = false }: UserShowCardProps) {
+export default function UserShowCard({ userShow, priority = false, newSeasonTag = null }: UserShowCardProps) {
   const { show_name, show_poster, tvmaze_show_id, status } = userShow;
   const badge = STATUS_CONFIG[status];
 
@@ -55,18 +55,21 @@ export default function UserShowCard({ userShow, priority = false, newSeasonComi
             </div>
           )}
 
-          {/* "New Season Soon" tag — top-left */}
-          {newSeasonComingSoon && (
+          {/* New season tag — top-left */}
+          {newSeasonTag && (
             <div
-              className="
+              className={`
                 absolute top-2 left-2
                 px-2 py-0.5 rounded-full
                 text-[9px] font-semibold
-                bg-amber-500/90 text-black
                 backdrop-blur-sm
-              "
+                ${newSeasonTag === "out"
+                  ? "bg-green-500/90 text-black"
+                  : "bg-amber-500/90 text-black"
+                }
+              `}
             >
-              New Season Soon
+              {newSeasonTag === "out" ? "New Season Out" : "New Season Soon"}
             </div>
           )}
 

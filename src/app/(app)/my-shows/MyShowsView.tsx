@@ -214,7 +214,7 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
                             key={userShow.id}
                             userShow={userShow}
                             priority={index < 4}
-                            newSeasonComingSoon={userShow.newSeasonComingSoon}
+                            newSeasonTag={userShow.newSeasonTag}
                           />
                         ))}
                       </motion.div>
@@ -237,7 +237,7 @@ export default function MyShowsView({ initialShows, isLoggedIn }: MyShowsViewPro
                     key={userShow.id}
                     userShow={userShow}
                     priority={index < 4}
-                    newSeasonComingSoon={userShow.newSeasonComingSoon}
+                    newSeasonTag={userShow.newSeasonTag}
                   />
                 ))}
               </motion.div>

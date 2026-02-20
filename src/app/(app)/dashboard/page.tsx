@@ -1,9 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { getPopularShows, getTopRatedShows } from "@/lib/tmdb";
+import { enrichUserShows } from "@/lib/enrich-shows";
 import PageWrapper from "@/components/layout/PageWrapper";
 import HomeView from "./HomeView";
-import type { TVMazeShow } from "@/types";
-import type { UserShow } from "@/types";
+import type { TVMazeShow, UserShow } from "@/types";
 
 export default async function DashboardPage() {
   // Fetch popular + top rated shows in parallel (cached 1hr by TMDB layer)
@@ -41,12 +41,15 @@ export default async function DashboardPage() {
     userShows = (data as UserShow[]) ?? [];
   }
 
+  // Enrich with TMDB metadata, auto-move, and sort
+  const enrichedShows = await enrichUserShows(userShows, supabase);
+
   return (
     <PageWrapper>
       <HomeView
         popularShows={popularShows}
         topRatedShows={topRatedShows}
-        userShows={userShows}
+        userShows={enrichedShows}
         isLoggedIn={!!user}
       />
     </PageWrapper>
