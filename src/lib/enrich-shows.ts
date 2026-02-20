@@ -140,11 +140,12 @@ export async function enrichUserShows(
   });
 
   // ── Auto-move completed shows ──────────────────────────────────────────
-  //  • Same-season upcoming episodes → "watching" (season isn't done yet)
-  //  • New season (soon or out)      → "plan_to_watch" (user can drop if uninterested)
+  //  Only auto-move when the SAME season still has unreleased episodes,
+  //  meaning the show isn't truly "completed" yet. New season tags ("soon"
+  //  / "out") are purely informational — the user can decide themselves
+  //  whether to continue watching a new season.
 
   const autoMoveToWatching: string[] = [];
-  const autoMoveToPlanToWatch: string[] = [];
 
   for (const show of enriched) {
     if (show.status !== "completed") continue;
@@ -152,9 +153,6 @@ export async function enrichUserShows(
     if (show.hasUpcomingEpisodesInCurrentSeason) {
       show.status = "watching";
       autoMoveToWatching.push(show.id);
-    } else if (show.newSeasonTag !== null) {
-      show.status = "plan_to_watch";
-      autoMoveToPlanToWatch.push(show.id);
     }
   }
 
@@ -166,15 +164,6 @@ export async function enrichUserShows(
       .in("id", autoMoveToWatching)
       .then(({ error }) => {
         if (error) console.error("Auto-move completed→watching failed:", error);
-      });
-  }
-  if (autoMoveToPlanToWatch.length > 0) {
-    supabase
-      .from("user_shows")
-      .update({ status: "plan_to_watch" })
-      .in("id", autoMoveToPlanToWatch)
-      .then(({ error }) => {
-        if (error) console.error("Auto-move completed→plan_to_watch failed:", error);
       });
   }
 
