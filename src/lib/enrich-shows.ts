@@ -38,11 +38,19 @@ export async function enrichUserShows(
 ): Promise<EnrichedUserShow[]> {
   if (shows.length === 0) return [];
 
-  // ── Fetch TMDB season metadata for all shows in parallel ────────────────
+  // ── Fetch TMDB season metadata + user watch progress in parallel ──────
 
-  const metaResults = await Promise.allSettled(
-    shows.map((s) => getShowSeasonMeta(s.tvmaze_show_id))
-  );
+  const showIds = shows.map((s) => s.tvmaze_show_id);
+
+  const [metaResults, watchProgressResult] = await Promise.all([
+    Promise.allSettled(shows.map((s) => getShowSeasonMeta(s.tvmaze_show_id))),
+    // Fetch the max watched season per show so we can skip "New Season Out"
+    // for shows the user has already started watching in the latest season
+    supabase
+      .from("watch_progress")
+      .select("tvmaze_show_id, season")
+      .in("tvmaze_show_id", showIds),
+  ]);
 
   const metaMap = new Map<number, ShowSeasonMeta>();
   metaResults.forEach((result, i) => {
@@ -50,6 +58,17 @@ export async function enrichUserShows(
       metaMap.set(shows[i].tvmaze_show_id, result.value);
     }
   });
+
+  // Build a map of showId → max watched season number
+  const maxWatchedSeasonMap = new Map<number, number>();
+  if (watchProgressResult.data) {
+    for (const row of watchProgressResult.data) {
+      const current = maxWatchedSeasonMap.get(row.tvmaze_show_id) ?? 0;
+      if (row.season > current) {
+        maxWatchedSeasonMap.set(row.tvmaze_show_id, row.season);
+      }
+    }
+  }
 
   // ── Enrich shows ────────────────────────────────────────────────────────
 
@@ -93,14 +112,21 @@ export async function enrichUserShows(
       // This uses the actual season air_date from TMDB's seasons array, so it only
       // triggers for genuinely recently released seasons — not old shows the user
       // is simply behind on.
+      // Skip if the user has already watched episodes in the latest season
+      // (they already know about it).
       if (
         newSeasonTag === null &&
         latestSeasonAirDate &&
         numberOfSeasons > 1
       ) {
-        const premiereDate = new Date(latestSeasonAirDate + "T00:00:00");
-        if (premiereDate >= threeMonthsAgo && premiereDate <= now) {
-          newSeasonTag = "out";
+        const maxWatched = maxWatchedSeasonMap.get(show.tvmaze_show_id) ?? 0;
+        const alreadyWatchingLatest = maxWatched >= numberOfSeasons;
+
+        if (!alreadyWatchingLatest) {
+          const premiereDate = new Date(latestSeasonAirDate + "T00:00:00");
+          if (premiereDate >= threeMonthsAgo && premiereDate <= now) {
+            newSeasonTag = "out";
+          }
         }
       }
     }
