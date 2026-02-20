@@ -12,7 +12,7 @@ const ALL_POSTERS = [
   // Game of Thrones (1399)
   "https://image.tmdb.org/t/p/w342/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg",
   // The Sopranos (1398)
-  "https://image.tmdb.org/t/p/w342/rTc7ZXdroqjkKivFPvCPX0Ru7OU.jpg",
+  "https://image.tmdb.org/t/p/w342/rTc7ZXdroqjkKivFPvCPX0Ru7uw.jpg",
   // Friends (1668)
   "https://image.tmdb.org/t/p/w342/f496cm9enuEsZkSPzCwnTESEK5s.jpg",
   // Stranger Things (66732)
@@ -24,9 +24,9 @@ const ALL_POSTERS = [
   // The Crown (65494)
   "https://image.tmdb.org/t/p/w342/1M876KPjulVwppEpldhdc8V4o68.jpg",
   // Dark (70523)
-  "https://image.tmdb.org/t/p/w342/apbrbWs5M9kQC35D5KBjSMFmhpP.jpg",
-  // Succession (63351)
-  "https://image.tmdb.org/t/p/w342/e2X8g1fFk6xM1dETObOLKgScFzZ.jpg",
+  "https://image.tmdb.org/t/p/w342/7CFCzWIZZcnxHke3yAQiGPWXHwF.jpg",
+  // Succession (76331)
+  "https://image.tmdb.org/t/p/w342/z0XiwdrCQ9yVIr4O0pxzaAYRxdW.jpg",
   // The Last of Us (100088)
   "https://image.tmdb.org/t/p/w342/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg",
   // House of the Dragon (94997)
@@ -36,9 +36,9 @@ const ALL_POSTERS = [
   // Ozark (69740)
   "https://image.tmdb.org/t/p/w342/pCGyPVrI9Fzw6rE1Pvi4BIXF6ET.jpg",
   // Better Call Saul (60059)
-  "https://image.tmdb.org/t/p/w342/ea1HoLMHytfBFMqSWbVBjKpjuPZ.jpg",
+  "https://image.tmdb.org/t/p/w342/fStn66ZiVMawCPpax22i7Gjyqem.jpg",
   // Severance (95396)
-  "https://image.tmdb.org/t/p/w342/lgkgmus0zf9J8RL9JFm4zmALMb2.jpg",
+  "https://image.tmdb.org/t/p/w342/fAzHg1AB7ZleOnnxip85DNu165d.jpg",
   // The Bear (136315)
   "https://image.tmdb.org/t/p/w342/sHFlbKS3WLqMnp9t2ghADIJFnuQ.jpg",
   // Squid Game (93405)
