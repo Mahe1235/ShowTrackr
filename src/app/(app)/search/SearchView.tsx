@@ -45,7 +45,7 @@ type SearchStatus   = "idle" | "loading" | "success" | "error" | "empty";
 type SortOption     = "popularity" | "rating" | "year_desc" | "year_asc" | "name";
 type StatusFilter   = "all" | "running" | "ended";
 type RatingFilter   = "any" | "7" | "8";
-type LanguageFilter = "all" | "english";
+type LanguageFilter = "all" | "en" | "hi" | "ta" | "te" | "ml" | "kn" | "ko" | "ja" | "fr" | "es" | "de" | "zh" | "pt";
 type PlatformFilter = "all" | typeof PLATFORMS[number];
 type ActiveSheet    = "sort" | "status" | "rating" | "platform" | "language" | null;
 
@@ -115,6 +115,24 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const statusFilter   = (searchParams.get("status") as StatusFilter) || "all";
   const ratingFilter   = (searchParams.get("rating") as RatingFilter) || "any";
   const langFilter     = (searchParams.get("lang") as LanguageFilter) || "all";
+
+  // Curated language list (ISO 639-1 code → display name)
+  const LANGUAGES: Array<{ code: LanguageFilter; label: string }> = [
+    { code: "all", label: "All Languages" },
+    { code: "en",  label: "English"       },
+    { code: "hi",  label: "Hindi"         },
+    { code: "ta",  label: "Tamil"         },
+    { code: "te",  label: "Telugu"        },
+    { code: "ml",  label: "Malayalam"     },
+    { code: "kn",  label: "Kannada"       },
+    { code: "ko",  label: "Korean"        },
+    { code: "ja",  label: "Japanese"      },
+    { code: "fr",  label: "French"        },
+    { code: "es",  label: "Spanish"       },
+    { code: "de",  label: "German"        },
+    { code: "zh",  label: "Chinese"       },
+    { code: "pt",  label: "Portuguese"    },
+  ];
   const platformFilter = (searchParams.get("platform") as PlatformFilter) || "all";
 
   const activeFilterCount =
@@ -193,7 +211,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       if (sortOption !== "popularity") params.set("sort", sortOption);
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (ratingFilter !== "any") params.set("rating", ratingFilter);
-      if (langFilter === "english") params.set("language", "en");
+      if (langFilter !== "all") params.set("language", langFilter);
       if (platformFilter !== "all") params.set("platform", platformFilter);
       return `/api/discover?${params.toString()}`;
     },
@@ -379,7 +397,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const statusLabel   = statusFilter   !== "all"        ? statusFilter === "running" ? "Running" : "Ended"   : "Status";
   const ratingLabel   = ratingFilter   !== "any"        ? `${ratingFilter}.0+`                               : "Rating";
   const platformLabel = platformFilter !== "all"        ? platformFilter                                      : "Platform";
-  const langLabel     = langFilter     !== "all"        ? "English"                                          : "Language";
+  const langLabel     = langFilter     !== "all"        ? (LANGUAGES.find((l) => l.code === langFilter)?.label ?? "Language") : "Language";
 
   return (
     <div className="flex flex-col gap-5 pt-12 pb-6">
@@ -852,24 +870,19 @@ export default function SearchView({ popularShows }: SearchViewProps) {
               {activeSheet === "language" && (
                 <>
                   <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">Language</p>
-                  <div className="flex flex-col gap-2">
-                    {(
-                      [
-                        { value: "all",     label: "All Languages" },
-                        { value: "english", label: "English"       },
-                      ] as { value: LanguageFilter; label: string }[]
-                    ).map(({ value, label }) => {
-                      const isSelected = langFilter === value;
+                  <div className="flex flex-col gap-2 max-h-[60vh] overflow-y-auto">
+                    {LANGUAGES.map(({ code, label }) => {
+                      const isSelected = langFilter === code;
                       return (
                         <button
-                          key={value}
+                          key={code}
                           onClick={() => {
-                            setParams({ lang: value === "all" ? null : value });
+                            setParams({ lang: code === "all" ? null : code });
                             setActiveSheet(null);
                           }}
                           className={`
                             flex items-center justify-between px-4 py-3.5 rounded-xl
-                            border transition-colors duration-150 text-left w-full
+                            border transition-colors duration-150 text-left w-full flex-shrink-0
                             ${isSelected
                               ? "bg-accent/15 border-accent/40 text-accent"
                               : "bg-bg-raised border-white/5 text-text-secondary hover:border-white/15 hover:text-text-primary"
