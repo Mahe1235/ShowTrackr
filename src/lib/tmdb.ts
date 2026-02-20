@@ -330,6 +330,17 @@ export const GENRE_MAP: Record<string, number> = {
   "Soap":               10766,
 };
 
+/** Indian streaming providers — TMDB provider IDs for watch_region=IN */
+export const PLATFORM_MAP: Record<string, number> = {
+  "Netflix":          8,
+  "Prime Video":      119,
+  "Disney+ Hotstar":  122,
+  "Apple TV+":        350,
+  "JioCinema":        220,
+  "SonyLIV":          237,
+  "ZEE5":             232,
+};
+
 /** Get popular TV shows — fetches 3 pages (~60 shows) in parallel */
 export async function getPopularShows(): Promise<TVMazeShow[]> {
   const [pages, genreMap] = await Promise.all([
@@ -498,10 +509,11 @@ export async function discoverShows(options: {
   sortBy?: string;
   status?: "running" | "ended";
   ratingMin?: number;
-  language?: string;       // ISO 639-1 code, e.g. "en"
-  voteCountMin?: number;   // minimum vote count (filters out obscure shows)
+  language?: string;          // ISO 639-1 code, e.g. "en"
+  voteCountMin?: number;      // minimum vote count (filters out obscure shows)
+  watchProviderId?: number;   // TMDB provider ID (watch_region=IN implied)
 }): Promise<{ shows: TVMazeShow[]; totalPages: number }> {
-  const { genreId, page = 1, sortBy = "popularity.desc", status, ratingMin, language, voteCountMin } = options;
+  const { genreId, page = 1, sortBy = "popularity.desc", status, ratingMin, language, voteCountMin, watchProviderId } = options;
 
   const params = new URLSearchParams({
     sort_by: sortBy,
@@ -514,6 +526,10 @@ export async function discoverShows(options: {
   if (ratingMin) params.set("vote_average.gte", String(ratingMin));
   if (language) params.set("with_original_language", language);
   if (voteCountMin) params.set("vote_count.gte", String(voteCountMin));
+  if (watchProviderId) {
+    params.set("with_watch_providers", String(watchProviderId));
+    params.set("watch_region", "IN");
+  }
 
   const [data, genreMap] = await Promise.all([
     tmdbFetch<{ results: TMDBListResultRaw[]; total_pages: number }>(
@@ -547,8 +563,9 @@ export async function discoverShowsByRating(options: {
   status?: "running" | "ended";
   ratingMin?: number;
   language?: string;
+  watchProviderId?: number;            // TMDB provider ID (watch_region=IN implied)
 }): Promise<{ shows: TVMazeShow[]; totalPages: number }> {
-  const { genreId, page = 1, status, ratingMin, language } = options;
+  const { genreId, page = 1, status, ratingMin, language, watchProviderId } = options;
 
   // Build base params — always fetch by popularity so we get well-known shows
   const baseParams = new URLSearchParams({
@@ -559,6 +576,10 @@ export async function discoverShowsByRating(options: {
   if (status === "ended") baseParams.set("with_status", "3|4");
   if (ratingMin) baseParams.set("vote_average.gte", String(ratingMin));
   if (language) baseParams.set("with_original_language", language);
+  if (watchProviderId) {
+    baseParams.set("with_watch_providers", String(watchProviderId));
+    baseParams.set("watch_region", "IN");
+  }
   baseParams.set("vote_count.gte", String(RATING_MIN_VOTES));
 
   // Fetch multiple pages in parallel

@@ -22,6 +22,16 @@ const GENRES = [
   "Talk",
 ] as const;
 
+const PLATFORMS = [
+  "Netflix",
+  "Prime Video",
+  "Disney+ Hotstar",
+  "JioCinema",
+  "SonyLIV",
+  "ZEE5",
+  "Apple TV+",
+] as const;
+
 const gridContainerVariants = {
   hidden: {},
   show: {
@@ -31,11 +41,13 @@ const gridContainerVariants = {
   },
 };
 
-type SearchStatus  = "idle" | "loading" | "success" | "error" | "empty";
-type SortOption    = "popularity" | "rating" | "year_desc" | "year_asc" | "name";
-type StatusFilter  = "all" | "running" | "ended";
-type RatingFilter  = "any" | "7" | "8";
+type SearchStatus   = "idle" | "loading" | "success" | "error" | "empty";
+type SortOption     = "popularity" | "rating" | "year_desc" | "year_asc" | "name";
+type StatusFilter   = "all" | "running" | "ended";
+type RatingFilter   = "any" | "7" | "8";
 type LanguageFilter = "all" | "english";
+type PlatformFilter = "all" | typeof PLATFORMS[number];
+type ActiveSheet    = "sort" | "status" | "rating" | "platform" | "language" | null;
 
 interface SearchViewProps {
   popularShows: TVMazeShow[];
@@ -50,30 +62,73 @@ interface FallbackInfo {
   relaxedFilterLabel: string;
 }
 
+// ── FilterChip ────────────────────────────────────────────────────────────────
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5
+        rounded-full border text-xs font-medium
+        transition-colors duration-150 whitespace-nowrap
+        ${active
+          ? "bg-accent/15 border-accent/40 text-accent"
+          : "bg-bg-surface border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary"
+        }
+      `}
+    >
+      {label}
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`transition-transform duration-150 ${active ? "text-accent" : "text-text-muted"}`}
+      >
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
+    </button>
+  );
+}
+
 export default function SearchView({ popularShows }: SearchViewProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
 
   // ── URL search params are the SINGLE SOURCE OF TRUTH for filters ──────────
-  // This means navigating away and back always restores the filters because
-  // the browser URL retains them.
-  const activeGenre  = searchParams.get("genre") ?? null;
-  const sortOption   = (searchParams.get("sort") as SortOption) || "popularity";
-  const statusFilter = (searchParams.get("status") as StatusFilter) || "all";
-  const ratingFilter = (searchParams.get("rating") as RatingFilter) || "any";
-  const langFilter   = (searchParams.get("lang") as LanguageFilter) || "all";
-
-  const filtersOpen = searchParams.get("filters") === "1";
+  const activeGenre    = searchParams.get("genre") ?? null;
+  const sortOption     = (searchParams.get("sort") as SortOption) || "popularity";
+  const statusFilter   = (searchParams.get("status") as StatusFilter) || "all";
+  const ratingFilter   = (searchParams.get("rating") as RatingFilter) || "any";
+  const langFilter     = (searchParams.get("lang") as LanguageFilter) || "all";
+  const platformFilter = (searchParams.get("platform") as PlatformFilter) || "all";
 
   const activeFilterCount =
-    (sortOption    !== "popularity" ? 1 : 0) +
-    (statusFilter  !== "all"        ? 1 : 0) +
-    (ratingFilter  !== "any"        ? 1 : 0) +
-    (langFilter    !== "all"        ? 1 : 0);
+    (sortOption      !== "popularity" ? 1 : 0) +
+    (statusFilter    !== "all"        ? 1 : 0) +
+    (ratingFilter    !== "any"        ? 1 : 0) +
+    (langFilter      !== "all"        ? 1 : 0) +
+    (platformFilter  !== "all"        ? 1 : 0);
 
   // Are any filters/genre active? If so, we use server-side discover.
   const useServerDiscover = !!(activeGenre || activeFilterCount > 0);
+
+  // ── Local state ────────────────────────────────────────────────────────────
+  const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
 
   // ── Helper: update one or more URL params (shallow replace, no scroll) ────
   const setParams = useCallback(
@@ -115,8 +170,6 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   const isTyping = query.trim().length > 0;
 
   // ── Determine which shows to display ──────────────────────────────────────
-  // All filtering is done server-side via /api/discover.
-  // popularShows is only used when there are NO filters and NO genre active.
   const displayShows = isTyping
     ? searchResults
     : useServerDiscover
@@ -131,8 +184,6 @@ export default function SearchView({ popularShows }: SearchViewProps) {
     !isTyping;
 
   // ── Build discover URL with filters ────────────────────────────────────────
-  // Works with or without a genre — when genre is omitted, TMDB returns all shows
-  // sorted/filtered by the other params (effectively "popular shows with filters").
   const buildDiscoverUrl = useCallback(
     (page: number): string => {
       const params = new URLSearchParams({
@@ -143,9 +194,10 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (ratingFilter !== "any") params.set("rating", ratingFilter);
       if (langFilter === "english") params.set("language", "en");
+      if (platformFilter !== "all") params.set("platform", platformFilter);
       return `/api/discover?${params.toString()}`;
     },
-    [activeGenre, sortOption, statusFilter, ratingFilter, langFilter]
+    [activeGenre, sortOption, statusFilter, ratingFilter, langFilter, platformFilter]
   );
 
   // ── Fetch discover results from /api/discover ─────────────────────────────
@@ -193,7 +245,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       fetchDiscover(buildDiscoverUrl(1), false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGenre, isTyping, sortOption, statusFilter, ratingFilter, langFilter]);
+  }, [activeGenre, isTyping, sortOption, statusFilter, ratingFilter, langFilter, platformFilter]);
 
   // ── Typed search query → /api/search ───────────────────────────────────────
   useEffect(() => {
@@ -259,6 +311,16 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useServerDiscover, isTyping, discoverLoading, discoverPage, discoverTotalPages, buildDiscoverUrl]);
 
+  // Close sheet on backdrop scroll (UX: dismiss when user scrolls away)
+  useEffect(() => {
+    if (activeSheet) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [activeSheet]);
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function handleGenreClick(genre: string) {
@@ -283,11 +345,8 @@ export default function SearchView({ popularShows }: SearchViewProps) {
       status: null,
       rating: null,
       lang: null,
+      platform: null,
     });
-  }
-
-  function toggleFiltersOpen() {
-    setParams({ filters: filtersOpen ? null : "1" });
   }
 
   // ── Computed display values ────────────────────────────────────────────────
@@ -315,8 +374,15 @@ export default function SearchView({ popularShows }: SearchViewProps) {
   // Initial discover load shows skeletons
   const showDiscoverSkeletons = useServerDiscover && !isTyping && discoverLoading && discoverShows.length === 0;
 
+  // ── Chip labels (show selected value when active) ─────────────────────────
+  const sortLabel     = sortOption     !== "popularity" ? { popularity: "Popular", rating: "Rating", year_desc: "Newest", year_asc: "Oldest", name: "A→Z" }[sortOption] ?? "Sort"   : "Sort";
+  const statusLabel   = statusFilter   !== "all"        ? statusFilter === "running" ? "Running" : "Ended"   : "Status";
+  const ratingLabel   = ratingFilter   !== "any"        ? `${ratingFilter}.0+`                               : "Rating";
+  const platformLabel = platformFilter !== "all"        ? platformFilter                                      : "Platform";
+  const langLabel     = langFilter     !== "all"        ? "English"                                          : "Language";
+
   return (
-    <div className="flex flex-col gap-6 pt-12 pb-6">
+    <div className="flex flex-col gap-5 pt-12 pb-6">
       {/* Heading */}
       <div>
         <h1 className="text-2xl font-bold">Discover</h1>
@@ -380,193 +446,41 @@ export default function SearchView({ popularShows }: SearchViewProps) {
         ))}
       </div>
 
-      {/* ── Filter / Sort ── */}
-      <div className="flex flex-col gap-0">
-        {/* Toggle row */}
-        <div className="flex items-center justify-between">
+      {/* ── Filter chips row ── */}
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 pb-0.5">
+        <FilterChip
+          label={sortLabel}
+          active={sortOption !== "popularity"}
+          onClick={() => setActiveSheet(activeSheet === "sort" ? null : "sort")}
+        />
+        <FilterChip
+          label={statusLabel}
+          active={statusFilter !== "all"}
+          onClick={() => setActiveSheet(activeSheet === "status" ? null : "status")}
+        />
+        <FilterChip
+          label={ratingLabel}
+          active={ratingFilter !== "any"}
+          onClick={() => setActiveSheet(activeSheet === "rating" ? null : "rating")}
+        />
+        <FilterChip
+          label={platformLabel}
+          active={platformFilter !== "all"}
+          onClick={() => setActiveSheet(activeSheet === "platform" ? null : "platform")}
+        />
+        <FilterChip
+          label={langLabel}
+          active={langFilter !== "all"}
+          onClick={() => setActiveSheet(activeSheet === "language" ? null : "language")}
+        />
+        {activeFilterCount > 0 && (
           <button
-            onClick={toggleFiltersOpen}
-            className={`
-              flex items-center gap-2 px-3.5 py-1.5
-              border rounded-xl text-xs font-medium
-              transition-colors duration-150
-              ${filtersOpen || activeFilterCount > 0
-                ? "bg-accent/10 border-accent/40 text-accent"
-                : "bg-bg-surface border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary"
-              }
-            `}
+            onClick={handleResetFilters}
+            className="flex-shrink-0 text-xs text-text-muted hover:text-red-400 transition-colors ml-1"
           >
-            {/* Sliders icon */}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="4"  y1="6"  x2="20" y2="6" />
-              <line x1="4"  y1="12" x2="20" y2="12" />
-              <line x1="4"  y1="18" x2="20" y2="18" />
-              <circle cx="8"  cy="6"  r="2.5" fill="currentColor" stroke="none" />
-              <circle cx="16" cy="12" r="2.5" fill="currentColor" stroke="none" />
-              <circle cx="10" cy="18" r="2.5" fill="currentColor" stroke="none" />
-            </svg>
-            Filters
-            {activeFilterCount > 0 && (
-              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-accent text-white text-[10px] font-semibold">
-                {activeFilterCount}
-              </span>
-            )}
+            Clear all
           </button>
-
-          {activeFilterCount > 0 && (
-            <button
-              onClick={handleResetFilters}
-              className="text-xs text-text-muted hover:text-text-secondary transition-colors"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        {/* Collapsible panel */}
-        <AnimatePresence initial={false}>
-          {filtersOpen && (
-            <motion.div
-              key="filter-panel"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2, ease: "easeInOut" }}
-              className="overflow-hidden"
-            >
-              <div className="flex flex-col gap-4 pt-4 pb-1">
-
-                {/* Sort */}
-                <div className="flex flex-col gap-2">
-                  <span className="text-[11px] font-medium text-text-muted uppercase tracking-wider">
-                    Sort by
-                  </span>
-                  <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4">
-                    {(
-                      [
-                        { value: "popularity", label: "Popular"  },
-                        { value: "rating",     label: "Rating"   },
-                        { value: "year_desc",  label: "Newest"   },
-                        { value: "year_asc",   label: "Oldest"   },
-                        { value: "name",       label: "A → Z"    },
-                      ] as { value: SortOption; label: string }[]
-                    ).map(({ value, label }) => (
-                      <button
-                        key={value}
-                        onClick={() =>
-                          setParams({ sort: value === "popularity" ? null : value })
-                        }
-                        className={`
-                          flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium
-                          border transition-colors duration-150
-                          ${sortOption === value
-                            ? "bg-accent border-accent text-white"
-                            : "bg-bg-raised border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary"
-                          }
-                        `}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Status */}
-                <div className="flex flex-col gap-2">
-                  <span className="text-[11px] font-medium text-text-muted uppercase tracking-wider">
-                    Status
-                  </span>
-                  <div className="flex gap-2">
-                    {(["all", "running", "ended"] as StatusFilter[]).map((v) => (
-                      <button
-                        key={v}
-                        onClick={() =>
-                          setParams({ status: v === "all" ? null : v })
-                        }
-                        className={`
-                          px-3 py-1.5 rounded-xl text-xs font-medium capitalize
-                          border transition-colors duration-150
-                          ${statusFilter === v
-                            ? "bg-accent border-accent text-white"
-                            : "bg-bg-raised border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary"
-                          }
-                        `}
-                      >
-                        {v === "all" ? "All" : v === "running" ? "Running" : "Ended"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Min Rating */}
-                <div className="flex flex-col gap-2">
-                  <span className="text-[11px] font-medium text-text-muted uppercase tracking-wider">
-                    Min Rating
-                  </span>
-                  <div className="flex gap-2">
-                    {(
-                      [
-                        { value: "any", label: "Any"  },
-                        { value: "7",   label: "7.0+" },
-                        { value: "8",   label: "8.0+" },
-                      ] as { value: RatingFilter; label: string }[]
-                    ).map(({ value, label }) => (
-                      <button
-                        key={value}
-                        onClick={() =>
-                          setParams({ rating: value === "any" ? null : value })
-                        }
-                        className={`
-                          px-3 py-1.5 rounded-xl text-xs font-medium
-                          border transition-colors duration-150
-                          ${ratingFilter === value
-                            ? "bg-accent border-accent text-white"
-                            : "bg-bg-raised border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary"
-                          }
-                        `}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Language */}
-                <div className="flex flex-col gap-2">
-                  <span className="text-[11px] font-medium text-text-muted uppercase tracking-wider">
-                    Language
-                  </span>
-                  <div className="flex gap-2">
-                    {(
-                      [
-                        { value: "all",     label: "All"     },
-                        { value: "english", label: "English" },
-                      ] as { value: LanguageFilter; label: string }[]
-                    ).map(({ value, label }) => (
-                      <button
-                        key={value}
-                        onClick={() =>
-                          setParams({ lang: value === "all" ? null : value })
-                        }
-                        className={`
-                          px-3 py-1.5 rounded-xl text-xs font-medium
-                          border transition-colors duration-150
-                          ${langFilter === value
-                            ? "bg-accent border-accent text-white"
-                            : "bg-bg-raised border-white/10 text-text-secondary hover:border-accent/40 hover:text-text-primary"
-                          }
-                        `}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        )}
       </div>
 
       {/* Results area */}
@@ -706,7 +620,7 @@ export default function SearchView({ popularShows }: SearchViewProps) {
               </AnimatePresence>
             )}
 
-            {/* Sentinel — loads more on scroll (server pages for discover, client virtual for others) */}
+            {/* Sentinel — loads more on scroll */}
             {hasMore && (
               <div ref={sentinelRef} className="h-8 mt-2 flex items-center justify-center">
                 {discoverLoading && (
@@ -717,6 +631,267 @@ export default function SearchView({ popularShows }: SearchViewProps) {
           </>
         )}
       </div>
+
+      {/* ── Filter bottom sheets ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {activeSheet && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              key="filter-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-[55] bg-black/60 backdrop-blur-sm"
+              onClick={() => setActiveSheet(null)}
+            />
+
+            {/* Sheet */}
+            <motion.div
+              key="filter-sheet"
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 400, damping: 40 }}
+              className="
+                fixed bottom-0 left-0 right-0 z-[60]
+                bg-bg-surface border-t border-white/10
+                rounded-t-2xl px-4 pt-3 pb-10
+              "
+            >
+              {/* Drag handle */}
+              <div className="w-10 h-1 rounded-full bg-bg-raised mx-auto mb-5" />
+
+              {/* Sort sheet */}
+              {activeSheet === "sort" && (
+                <>
+                  <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">Sort by</p>
+                  <div className="flex flex-col gap-2">
+                    {(
+                      [
+                        { value: "popularity", label: "Popular"  },
+                        { value: "rating",     label: "Top Rated" },
+                        { value: "year_desc",  label: "Newest"   },
+                        { value: "year_asc",   label: "Oldest"   },
+                        { value: "name",       label: "A → Z"    },
+                      ] as { value: SortOption; label: string }[]
+                    ).map(({ value, label }) => {
+                      const isSelected = sortOption === value;
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => {
+                            setParams({ sort: value === "popularity" ? null : value });
+                            setActiveSheet(null);
+                          }}
+                          className={`
+                            flex items-center justify-between px-4 py-3.5 rounded-xl
+                            border transition-colors duration-150 text-left w-full
+                            ${isSelected
+                              ? "bg-accent/15 border-accent/40 text-accent"
+                              : "bg-bg-raised border-white/5 text-text-secondary hover:border-white/15 hover:text-text-primary"
+                            }
+                          `}
+                        >
+                          <span className="text-sm font-medium">{label}</span>
+                          {isSelected && (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Status sheet */}
+              {activeSheet === "status" && (
+                <>
+                  <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">Status</p>
+                  <div className="flex flex-col gap-2">
+                    {(
+                      [
+                        { value: "all",     label: "All"     },
+                        { value: "running", label: "Running" },
+                        { value: "ended",   label: "Ended"   },
+                      ] as { value: StatusFilter; label: string }[]
+                    ).map(({ value, label }) => {
+                      const isSelected = statusFilter === value;
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => {
+                            setParams({ status: value === "all" ? null : value });
+                            setActiveSheet(null);
+                          }}
+                          className={`
+                            flex items-center justify-between px-4 py-3.5 rounded-xl
+                            border transition-colors duration-150 text-left w-full
+                            ${isSelected
+                              ? "bg-accent/15 border-accent/40 text-accent"
+                              : "bg-bg-raised border-white/5 text-text-secondary hover:border-white/15 hover:text-text-primary"
+                            }
+                          `}
+                        >
+                          <span className="text-sm font-medium">{label}</span>
+                          {isSelected && (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Rating sheet */}
+              {activeSheet === "rating" && (
+                <>
+                  <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">Min Rating</p>
+                  <div className="flex flex-col gap-2">
+                    {(
+                      [
+                        { value: "any", label: "Any Rating" },
+                        { value: "7",   label: "7.0 and above" },
+                        { value: "8",   label: "8.0 and above" },
+                      ] as { value: RatingFilter; label: string }[]
+                    ).map(({ value, label }) => {
+                      const isSelected = ratingFilter === value;
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => {
+                            setParams({ rating: value === "any" ? null : value });
+                            setActiveSheet(null);
+                          }}
+                          className={`
+                            flex items-center justify-between px-4 py-3.5 rounded-xl
+                            border transition-colors duration-150 text-left w-full
+                            ${isSelected
+                              ? "bg-accent/15 border-accent/40 text-accent"
+                              : "bg-bg-raised border-white/5 text-text-secondary hover:border-white/15 hover:text-text-primary"
+                            }
+                          `}
+                        >
+                          <span className="text-sm font-medium">{label}</span>
+                          {isSelected && (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Platform sheet */}
+              {activeSheet === "platform" && (
+                <>
+                  <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">Platform</p>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => {
+                        setParams({ platform: null });
+                        setActiveSheet(null);
+                      }}
+                      className={`
+                        flex items-center justify-between px-4 py-3.5 rounded-xl
+                        border transition-colors duration-150 text-left w-full
+                        ${platformFilter === "all"
+                          ? "bg-accent/15 border-accent/40 text-accent"
+                          : "bg-bg-raised border-white/5 text-text-secondary hover:border-white/15 hover:text-text-primary"
+                        }
+                      `}
+                    >
+                      <span className="text-sm font-medium">All Platforms</span>
+                      {platformFilter === "all" && (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                    {PLATFORMS.map((platform) => {
+                      const isSelected = platformFilter === platform;
+                      return (
+                        <button
+                          key={platform}
+                          onClick={() => {
+                            setParams({ platform });
+                            setActiveSheet(null);
+                          }}
+                          className={`
+                            flex items-center justify-between px-4 py-3.5 rounded-xl
+                            border transition-colors duration-150 text-left w-full
+                            ${isSelected
+                              ? "bg-accent/15 border-accent/40 text-accent"
+                              : "bg-bg-raised border-white/5 text-text-secondary hover:border-white/15 hover:text-text-primary"
+                            }
+                          `}
+                        >
+                          <span className="text-sm font-medium">{platform}</span>
+                          {isSelected && (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Language sheet */}
+              {activeSheet === "language" && (
+                <>
+                  <p className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">Language</p>
+                  <div className="flex flex-col gap-2">
+                    {(
+                      [
+                        { value: "all",     label: "All Languages" },
+                        { value: "english", label: "English"       },
+                      ] as { value: LanguageFilter; label: string }[]
+                    ).map(({ value, label }) => {
+                      const isSelected = langFilter === value;
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => {
+                            setParams({ lang: value === "all" ? null : value });
+                            setActiveSheet(null);
+                          }}
+                          className={`
+                            flex items-center justify-between px-4 py-3.5 rounded-xl
+                            border transition-colors duration-150 text-left w-full
+                            ${isSelected
+                              ? "bg-accent/15 border-accent/40 text-accent"
+                              : "bg-bg-raised border-white/5 text-text-secondary hover:border-white/15 hover:text-text-primary"
+                            }
+                          `}
+                        >
+                          <span className="text-sm font-medium">{label}</span>
+                          {isSelected && (
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

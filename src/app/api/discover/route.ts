@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { discoverShows, discoverShowsByRating, GENRE_MAP } from "@/lib/tmdb";
+import { discoverShows, discoverShowsByRating, GENRE_MAP, PLATFORM_MAP } from "@/lib/tmdb";
 import type { TVMazeShow } from "@/types";
 
 // Map client sort options to TMDB sort_by values
@@ -24,6 +24,7 @@ const FILTER_LABELS: Record<string, Record<string, string>> = {
   rating:   { "8": "8+ rating", "7": "7+ rating" },
   status:   { running: "Running status", ended: "Ended status" },
   language: { en: "English only" },
+  platform: Object.fromEntries(Object.keys(PLATFORM_MAP).map((k) => [k, `${k} only`])),
 };
 
 async function tryFallback(opts: {
@@ -32,6 +33,8 @@ async function tryFallback(opts: {
   status: "running" | "ended" | undefined;
   ratingMin: number | undefined;
   language: string | undefined;
+  watchProviderId: number | undefined;
+  platformName: string | undefined;
 }): Promise<FallbackResult | null> {
   // Build relaxation candidates in priority order (most restrictive first)
   const candidates: Array<{
@@ -61,6 +64,13 @@ async function tryFallback(opts: {
       overrides: { language: undefined },
     });
   }
+  if (opts.watchProviderId && opts.platformName) {
+    candidates.push({
+      filter: "platform",
+      label: `${opts.platformName} only`,
+      overrides: { watchProviderId: undefined, platformName: undefined },
+    });
+  }
 
   for (const candidate of candidates) {
     const relaxed = { ...opts, ...candidate.overrides };
@@ -74,6 +84,7 @@ async function tryFallback(opts: {
         status: relaxed.status,
         ratingMin: relaxed.ratingMin,
         language: relaxed.language,
+        watchProviderId: relaxed.watchProviderId,
       });
     } else {
       const sortBy = SORT_MAP[relaxed.sort] ?? "popularity.desc";
@@ -84,6 +95,7 @@ async function tryFallback(opts: {
         status: relaxed.status,
         ratingMin: relaxed.ratingMin,
         language: relaxed.language,
+        watchProviderId: relaxed.watchProviderId,
       });
     }
 
@@ -104,17 +116,19 @@ async function tryFallback(opts: {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const genre    = searchParams.get("genre") ?? "";
-  const page     = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
-  const sort     = searchParams.get("sort") ?? "popularity";
-  const status   = (searchParams.get("status") as "running" | "ended" | null) ?? undefined;
-  const rating   = searchParams.get("rating");
-  const language = searchParams.get("language") ?? undefined;
+  const genre        = searchParams.get("genre") ?? "";
+  const page         = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
+  const sort         = searchParams.get("sort") ?? "popularity";
+  const status       = (searchParams.get("status") as "running" | "ended" | null) ?? undefined;
+  const rating       = searchParams.get("rating");
+  const language     = searchParams.get("language") ?? undefined;
+  const platformName = searchParams.get("platform") ?? undefined;
 
-  const genreId   = GENRE_MAP[genre] ?? undefined;
-  const ratingMin = rating ? parseFloat(rating) : undefined;
+  const genreId          = GENRE_MAP[genre] ?? undefined;
+  const ratingMin        = rating ? parseFloat(rating) : undefined;
+  const watchProviderId  = platformName ? PLATFORM_MAP[platformName] : undefined;
 
-  const hasActiveFilters = !!(ratingMin || status || language);
+  const hasActiveFilters = !!(ratingMin || status || language || watchProviderId);
 
   try {
     // When sorting by rating, use the hybrid approach:
@@ -128,6 +142,7 @@ export async function GET(request: Request) {
         status: status ?? undefined,
         ratingMin,
         language: language ?? undefined,
+        watchProviderId,
       });
     } else {
       const sortBy = SORT_MAP[sort] ?? "popularity.desc";
@@ -138,6 +153,7 @@ export async function GET(request: Request) {
         status: status ?? undefined,
         ratingMin,
         language: language ?? undefined,
+        watchProviderId,
       });
     }
 
@@ -149,6 +165,8 @@ export async function GET(request: Request) {
         status: status ?? undefined,
         ratingMin,
         language: language ?? undefined,
+        watchProviderId,
+        platformName,
       });
 
       if (fallback) {
