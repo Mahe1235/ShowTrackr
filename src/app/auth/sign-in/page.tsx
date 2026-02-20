@@ -36,9 +36,9 @@ const ALL_POSTERS = [
   // Ozark (69740)
   "https://image.tmdb.org/t/p/w342/pCGyPVrI9Fzw6rE1Pvi4BIXF6ET.jpg",
   // Better Call Saul (60059)
-  "https://image.tmdb.org/t/p/w342/fStn66ZiVMawCPpax22i7Gjyqem.jpg",
+  "https://image.tmdb.org/t/p/w342/fC2HDm5t0kHl7mTm7jxMR31b7by.jpg",
   // Severance (95396)
-  "https://image.tmdb.org/t/p/w342/fAzHg1AB7ZleOnnxip85DNu165d.jpg",
+  "https://image.tmdb.org/t/p/w342/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg",
   // The Bear (136315)
   "https://image.tmdb.org/t/p/w342/sHFlbKS3WLqMnp9t2ghADIJFnuQ.jpg",
   // Squid Game (93405)
