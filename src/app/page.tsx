@@ -1,5 +1,12 @@
-import { redirect } from "next/navigation";
+"use client";
 
-export default function LandingPage() {
-  redirect("/auth/sign-in");
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function RootPage() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/auth/sign-in");
+  }, [router]);
+  return null;
 }
